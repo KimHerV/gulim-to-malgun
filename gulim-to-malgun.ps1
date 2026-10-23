@@ -4,26 +4,32 @@
 .DESCRIPTION
     Menu       (default) Numbered menu with the current patch state at the top.
     Install    Apply the fix now and re-apply it at every startup and sign-in.
-    Uninstall  Remove the automation and put the font registry back the way it was.
+    Uninstall  Remove the automation and put back every value this tool changed.
     Status     Show what Gulim renders as right now, and why. Read-only, no admin needed.
     Apply      Apply once without installing anything. The scheduled task runs this.
 
-    FontSubstitutes only applies to names that are not installed, and Windows updates
-    re-register gulim.ttc. Apply removes that registration (the file stays in place) and
-    points every Gulim/Dotum name at the target font. It does nothing when both are already
-    in place, and backs up both registry keys before changing anything.
+    Gulim reaches the screen three ways, and Apply closes each one:
+    - By name. While gulim.ttc is registered under ...\CurrentVersion\Fonts, GDI and DirectWrite
+      hand out the real Gulim for 굴림/Gulim no matter what FontSubstitutes says. Apply removes that
+      registration (the file stays on disk) and points every Gulim/Dotum name at the target font.
+    - By font linking. FontLink\SystemLink makes Tahoma, Microsoft Sans Serif and others borrow
+      missing glyphs (Hanja, kana, sometimes Hangul) from GULIM.TTC by file name. Apply puts the
+      target font ahead of Gulim in those chains.
+    - By default face. Unknown names fall through to the Korean default face, Gulim, and from there
+      through FontSubstitutes, which now points at the target font.
+    GDI reads all of this when the session starts, so changes show up after a reboot.
 .PARAMETER TargetFace
-    Font to render instead. Defaults to Malgun Gothic.
+    Font to render instead. Must be installed for all users. Defaults to Malgun Gothic.
 .PARAMETER IncludeBatang
     Also replace Batang, BatangChe, Gungsuh and GungsuhChe (바탕, 궁서).
 .PARAMETER RemoveCapability
     Also uninstall the Korean Supplemental Fonts feature, which deletes gulim.ttc and batang.ttc.
-    Only needed if Gulim still shows up after the registry fix. Uninstall reinstalls it
-    (needs an internet connection).
+    Only done in an interactive Install or Apply, never by the scheduled task. Uninstall
+    reinstalls it (needs an internet connection).
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\gulim-to-malgun.ps1
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File .\gulim-to-malgun.ps1 Install
+    powershell -ExecutionPolicy Bypass -File .\gulim-to-malgun.ps1 Install -IncludeBatang
 #>
 [CmdletBinding()]
 param(
@@ -47,16 +53,25 @@ $FontSets = [ordered]@{
 
 $SubstitutesSubKey = 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\FontSubstitutes'
 $FontsSubKey       = 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts'
+$SystemLinkSubKey  = 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\FontLink\SystemLink'
 $CapabilityPattern = 'Language.Fonts.Kore*'
 $TaskName          = 'gulim-to-malgun'
 
-# The installed copy, backups and logs live where only administrators can write,
+# Full paths, so nothing earlier on PATH can stand in for them when running as SYSTEM.
+$RegExe            = Join-Path $env:SystemRoot 'System32\reg.exe'
+$PowerShellExe     = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+
+# The installed copy, journal, backups and logs live where only administrators can write,
 # because the scheduled task runs the installed copy as SYSTEM.
 $InstallDir        = Join-Path $env:ProgramFiles 'gulim-to-malgun'
 $InstalledScript   = Join-Path $InstallDir 'gulim-to-malgun.ps1'
+$JournalFile       = Join-Path $InstallDir 'original-values.json'
 $BackupDir         = Join-Path $InstallDir 'backup'
 $LogFile           = Join-Path $InstallDir 'logs\apply.log'
 $CapabilityMarker  = Join-Path $InstallDir 'capability-removed.txt'
+
+# Kept in memory so Install still works after Uninstall deleted the installed copy this runs from.
+$SelfText          = [IO.File]::ReadAllText($PSCommandPath)
 
 #region Helpers
 
@@ -70,6 +85,11 @@ function Open-HklmKey([string]$SubKey, [switch]$Writable) {
     return $hklm.OpenSubKey($SubKey, [bool]$Writable)
 }
 
+function Get-RegValue([string]$SubKey, [string]$Name) {
+    $key = Open-HklmKey $SubKey
+    try { return $key.GetValue($Name, $null, 'DoNotExpandEnvironmentNames') } finally { $key.Close() }
+}
+
 # Values under ...\CurrentVersion\Fonts that point at the given font file.
 function Get-RegisteredFontEntries([string]$File) {
     $key = Open-HklmKey $FontsSubKey
@@ -79,11 +99,6 @@ function Get-RegisteredFontEntries([string]$File) {
             if ([IO.Path]::GetFileName($data) -ieq $File) { [pscustomobject]@{ Name = $name; Data = $data } }
         }
     } finally { $key.Close() }
-}
-
-function Get-Substitute([string]$Name) {
-    $key = Open-HklmKey $SubstitutesSubKey
-    try { return $key.GetValue($Name) } finally { $key.Close() }
 }
 
 # All localized family names of an installed font, e.g. 'Malgun Gothic' -> Malgun Gothic, 맑은 고딕.
@@ -97,8 +112,60 @@ function Get-FamilyNames([string]$Face) {
     return @()
 }
 
+# File name of a font installed for all users (HKLM), e.g. 'Malgun Gothic' -> malgun.ttf.
+# Per-user fonts don't count: SYSTEM and other accounts can't see them.
+function Get-MachineFontFile([string]$Face) {
+    $names = @(Get-FamilyNames $Face) + $Face
+    $key = Open-HklmKey $FontsSubKey
+    try {
+        foreach ($valueName in $key.GetValueNames()) {
+            # 'Malgun Gothic (TrueType)', 'Gulim & GulimChe & Dotum & DotumChe (TrueType)'
+            $families = ($valueName -replace '\s*\([^)]*\)\s*$', '') -split '\s*&\s*'
+            foreach ($family in $families) {
+                if ($names -contains $family) { return [IO.Path]::GetFileName([string]$key.GetValue($valueName)) }
+            }
+        }
+    } finally { $key.Close() }
+    return $null
+}
+
+# SystemLink chains that would borrow glyphs from Gulim (or Batang) before the target font,
+# with the chain they should have instead: the target inserted just ahead of the first such entry,
+# in the scaled + unscaled pair Windows itself uses for Segoe UI.
+function Get-LinkFixes([string]$TargetFile) {
+    $blocked = @(Get-FontSets | ForEach-Object { $_.File })
+    $key = Open-HklmKey $SystemLinkSubKey
+    try {
+        foreach ($name in $key.GetValueNames()) {
+            if ($name -like "$TargetFace*") { continue }
+            if ($key.GetValueKind($name) -ne 'MultiString') { continue }
+            $chain = @($key.GetValue($name))
+            $blockedAt = -1
+            $targetAt = -1
+            for ($i = 0; $i -lt $chain.Count; $i++) {
+                $file = ($chain[$i] -split ',')[0].Trim()
+                if ($blockedAt -lt 0 -and $blocked -contains $file) { $blockedAt = $i }
+                if ($targetAt -lt 0 -and $file -ieq $TargetFile) { $targetAt = $i }
+            }
+            if ($blockedAt -lt 0) { continue }
+            if ($targetAt -ge 0 -and $targetAt -lt $blockedAt) { continue }
+
+            $fixed = New-Object System.Collections.Generic.List[string]
+            for ($i = 0; $i -lt $chain.Count; $i++) {
+                if ($i -eq $blockedAt) {
+                    $fixed.Add("$($TargetFile.ToUpper()),$TargetFace,128,96")
+                    $fixed.Add("$($TargetFile.ToUpper()),$TargetFace")
+                }
+                $fixed.Add($chain[$i])
+            }
+            [pscustomobject]@{ Name = $name; Blocked = $chain[$blockedAt]; Chain = [string[]]$fixed.ToArray() }
+        }
+    } finally { $key.Close() }
+}
+
 # Family name of the font GDI actually loads for a requested face, after FontSubstitutes.
 # Read from the loaded font's name table, so it reports the real font rather than the request.
+# GDI reads its tables when the session starts, so this reflects the registry as of the last sign-in.
 function Resolve-GdiFamily([string]$Face) {
     if (-not ('GulimToMalgun.Gdi' -as [type])) {
         Add-Type -TypeDefinition @'
@@ -165,14 +232,21 @@ function Test-Admin {
         [Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-# Re-runs this script in an elevated window with the same arguments plus -Elevated, and waits for it.
+# Re-runs this script in an elevated window with the same arguments plus -Elevated.
+# Returns the elevated run's exit code, or 1 when the administrator prompt is declined.
 function Invoke-Elevated {
     $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"", $Action, '-Elevated',
         '-TargetFace', "`"$TargetFace`"")
     if ($IncludeBatang) { $argList += '-IncludeBatang' }
     if ($RemoveCapability) { $argList += '-RemoveCapability' }
     Write-Host 'Administrator rights are needed; opening an elevated window...'
-    Start-Process powershell.exe -Verb RunAs -ArgumentList $argList -Wait
+    try {
+        $process = Start-Process $PowerShellExe -Verb RunAs -ArgumentList $argList -Wait -PassThru
+        return $process.ExitCode
+    } catch {
+        Write-Host 'Cancelled: administrator rights were not granted.' -ForegroundColor Yellow
+        return 1
+    }
 }
 
 function Write-Log([string]$Message) {
@@ -186,8 +260,62 @@ function Write-Log([string]$Message) {
 # which Windows PowerShell 5.1 turns into terminating errors under ErrorActionPreference Stop.
 function Invoke-Reg([string[]]$Arguments) {
     $quoted = $Arguments | ForEach-Object { if ($_ -match '\s') { "`"$_`"" } else { $_ } }
-    $process = Start-Process reg.exe -ArgumentList $quoted -Wait -PassThru -WindowStyle Hidden
+    $process = Start-Process $RegExe -ArgumentList $quoted -Wait -PassThru -WindowStyle Hidden
     if ($process.ExitCode -ne 0) { throw "reg.exe $($Arguments -join ' ') failed with exit code $($process.ExitCode)" }
+}
+
+#endregion
+
+#region Journal
+# original-values.json holds, for every registry value this tool has changed, what it was before the
+# first change. Each entry is written before the change it describes, so Uninstall can put back
+# exactly those values even after a run that failed half-way.
+
+function Read-Journal {
+    $journal = [ordered]@{}
+    if (Test-Path $JournalFile) {
+        foreach ($entry in (Get-Content $JournalFile -Raw -Encoding UTF8 | ConvertFrom-Json)) {
+            $journal["$($entry.Key)|$($entry.Name)"] = $entry
+        }
+    }
+    return $journal
+}
+
+function Save-Journal($Journal) {
+    New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+    $temp = "$JournalFile.tmp"
+    $json = ConvertTo-Json -InputObject @($Journal.Values) -Depth 5
+    [IO.File]::WriteAllText($temp, $json, (New-Object Text.UTF8Encoding $false))
+    Move-Item $temp $JournalFile -Force
+}
+
+# Records a value's current state in the journal unless an earlier change already did.
+function Save-Original($Journal, [string]$SubKey, [string]$Name) {
+    if ($Journal.Contains("$SubKey|$Name")) { return }
+    $key = Open-HklmKey $SubKey
+    try {
+        $existed = $key.GetValueNames() -contains $Name
+        $Journal["$SubKey|$Name"] = [pscustomobject]@{
+            Key     = $SubKey
+            Name    = $Name
+            Existed = $existed
+            Kind    = $(if ($existed) { [string]$key.GetValueKind($Name) } else { $null })
+            Data    = $(if ($existed) { $key.GetValue($Name, $null, 'DoNotExpandEnvironmentNames') } else { $null })
+        }
+    } finally { $key.Close() }
+    Save-Journal $Journal
+}
+
+function Set-JournaledValue($Journal, [string]$SubKey, [string]$Name, $Data, [string]$Kind) {
+    Save-Original $Journal $SubKey $Name
+    $key = Open-HklmKey $SubKey -Writable
+    try { $key.SetValue($Name, $Data, $Kind) } finally { $key.Close() }
+}
+
+function Remove-JournaledValue($Journal, [string]$SubKey, [string]$Name) {
+    Save-Original $Journal $SubKey $Name
+    $key = Open-HklmKey $SubKey -Writable
+    try { $key.DeleteValue($Name, $false) } finally { $key.Close() }
 }
 
 #endregion
@@ -195,133 +323,173 @@ function Invoke-Reg([string[]]$Arguments) {
 #region Actions
 
 function Invoke-Apply {
-    if (-not (Get-FamilyNames $TargetFace)) { throw "Target font '$TargetFace' is not installed." }
+    $targetFile = Get-MachineFontFile $TargetFace
+    if (-not $targetFile) { throw "Target font '$TargetFace' is not installed for all users." }
 
     $steps = @()
     foreach ($set in Get-FontSets) {
         foreach ($name in $set.Names) {
-            $current = Get-Substitute $name
+            $current = Get-RegValue $SubstitutesSubKey $name
             if ($current -ne $TargetFace) { $steps += [pscustomobject]@{ Kind = 'Substitute'; Name = $name; From = $current } }
         }
         foreach ($entry in Get-RegisteredFontEntries $set.File) {
             $steps += [pscustomobject]@{ Kind = 'Unregister'; Name = $entry.Name; From = $entry.Data }
         }
     }
+    foreach ($fix in Get-LinkFixes $targetFile) {
+        $steps += [pscustomobject]@{ Kind = 'Link'; Name = $fix.Name; From = $fix.Blocked; Chain = $fix.Chain }
+    }
 
+    # Removing a Windows feature can take minutes; never do it from the startup task.
     $capabilities = @()
-    if ($RemoveCapability) {
+    if ($RemoveCapability -and -not $Quiet) {
         $capabilities = @(Get-WindowsCapability -Online |
             Where-Object { $_.Name -like $CapabilityPattern -and $_.State -eq 'Installed' })
     }
 
     if (-not $steps -and -not $capabilities) {
-        if (-not $Quiet) { Write-Host "Already applied: Gulim renders as $TargetFace." }
+        if (-not $Quiet) { Write-Host "Already applied: nothing to change." }
         return $false
     }
 
-    # Backups are named by time; Uninstall restores the oldest, i.e. the state before the first change.
-    if (-not (Test-Path $BackupDir)) { New-Item -ItemType Directory -Path $BackupDir -Force | Out-Null }
-    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-    Invoke-Reg @('export', "HKLM\$SubstitutesSubKey", (Join-Path $BackupDir "$stamp-FontSubstitutes.reg"), '/y', '/reg:64')
-    Invoke-Reg @('export', "HKLM\$FontsSubKey", (Join-Path $BackupDir "$stamp-Fonts.reg"), '/y', '/reg:64')
-    Write-Log "Backed up font registry keys as $stamp"
+    # Whole-key exports from before the first change, for manual recovery only.
+    if (-not (Test-Path $BackupDir)) {
+        $temp = "$BackupDir.tmp"
+        if (Test-Path $temp) { Remove-Item $temp -Recurse -Force }
+        New-Item -ItemType Directory -Path $temp -Force | Out-Null
+        foreach ($pair in @(@('FontSubstitutes', $SubstitutesSubKey), @('Fonts', $FontsSubKey), @('SystemLink', $SystemLinkSubKey))) {
+            Invoke-Reg @('export', "HKLM\$($pair[1])", (Join-Path $temp "original-$($pair[0]).reg"), '/y', '/reg:64')
+        }
+        Move-Item $temp $BackupDir
+    }
 
-    $substitutes = Open-HklmKey $SubstitutesSubKey -Writable
-    $fonts = Open-HklmKey $FontsSubKey -Writable
-    try {
-        foreach ($step in $steps) {
-            if ($step.Kind -eq 'Substitute') {
-                $substitutes.SetValue($step.Name, $TargetFace, 'String')
+    $journal = Read-Journal
+    foreach ($step in $steps) {
+        switch ($step.Kind) {
+            'Substitute' {
+                Set-JournaledValue $journal $SubstitutesSubKey $step.Name $TargetFace 'String'
                 Write-Log "Substitute  $($step.Name): '$($step.From)' -> '$TargetFace'"
-            } else {
-                $fonts.DeleteValue($step.Name)
+            }
+            'Unregister' {
+                Remove-JournaledValue $journal $FontsSubKey $step.Name
                 Write-Log "Unregister  $($step.Name) = $($step.From)"
             }
+            'Link' {
+                Set-JournaledValue $journal $SystemLinkSubKey $step.Name $step.Chain 'MultiString'
+                Write-Log "Link        $($step.Name): $TargetFace ahead of $($step.From)"
+            }
         }
-    } finally {
-        $substitutes.Close()
-        $fonts.Close()
     }
 
     foreach ($capability in $capabilities) {
-        Remove-WindowsCapability -Online -Name $capability.Name | Out-Null
+        # Marker first, so Uninstall reinstalls it even if removal fails half-way.
         Add-Content -Path $CapabilityMarker -Value $capability.Name -Encoding UTF8
+        Write-Log "Removing capability $($capability.Name)..."
+        Remove-WindowsCapability -Online -Name $capability.Name | Out-Null
         Write-Log "Removed capability $($capability.Name)"
     }
     return $true
 }
 
 function Invoke-Install {
-    New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
-    if ($PSCommandPath -ne $InstalledScript) { Copy-Item $PSCommandPath $InstalledScript -Force }
-
     $changed = Invoke-Apply
+
+    New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+    [IO.File]::WriteAllText($InstalledScript, $SelfText, (New-Object Text.UTF8Encoding $true))
 
     $arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$InstalledScript`" Apply -Quiet -TargetFace `"$TargetFace`""
     if ($IncludeBatang) { $arguments += ' -IncludeBatang' }
-    if ($RemoveCapability) { $arguments += ' -RemoveCapability' }
 
-    $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arguments
+    $action = New-ScheduledTaskAction -Execute $PowerShellExe -Argument $arguments
     $triggers = @(New-ScheduledTaskTrigger -AtStartup; New-ScheduledTaskTrigger -AtLogOn)
     $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
         -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
     Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $triggers -Principal $principal `
         -Settings $settings -Description 'Keeps Gulim rendering as Malgun Gothic after Windows updates.' -Force | Out-Null
 
     Write-Host ''
-    Write-Host "Installed. The fix is re-applied automatically at every startup and sign-in." -ForegroundColor Green
-    if ($changed) { Write-Host 'Sign out and back in (or reboot) so running apps pick up the change.' }
+    Write-Host 'Installed. The fix is re-applied automatically at every startup and sign-in.' -ForegroundColor Green
+    if ($changed) { Write-Host 'Reboot so Windows and running apps pick up the change.' }
 }
 
 function Invoke-Uninstall {
+    # Feature first: if it can't come back, leave everything else (and the task) as it is,
+    # rather than re-registering a font file that no longer exists.
+    if (Test-Path $CapabilityMarker) {
+        foreach ($name in Get-Content $CapabilityMarker -Encoding UTF8 | Where-Object { $_ } | Select-Object -Unique) {
+            $capability = Get-WindowsCapability -Online -Name $name
+            if ($capability.State -ne 'Installed') {
+                Write-Host "Reinstalling $name (needs an internet connection)..."
+                Add-WindowsCapability -Online -Name $name | Out-Null
+            }
+        }
+    }
+
+    $journal = Read-Journal
+    $fontsDir = Join-Path $env:SystemRoot 'Fonts'
+    foreach ($entry in @($journal.Values)) {
+        $key = Open-HklmKey $entry.Key -Writable
+        try {
+            if (-not $entry.Existed) {
+                $key.DeleteValue($entry.Name, $false)
+            } elseif ($entry.Key -eq $FontsSubKey -and -not (Test-Path (Join-Path $fontsDir ([IO.Path]::GetFileName([string]$entry.Data))))) {
+                Write-Host "Skipped re-registering $($entry.Name): $($entry.Data) is not in $fontsDir." -ForegroundColor Yellow
+            } else {
+                $data = if ($entry.Kind -eq 'MultiString') { [string[]]@($entry.Data) } else { $entry.Data }
+                $key.SetValue($entry.Name, $data, [Microsoft.Win32.RegistryValueKind]$entry.Kind)
+            }
+        } finally { $key.Close() }
+    }
+    if ($journal.Count) {
+        Write-Host "Restored $($journal.Count) registry value(s) to how they were before the first change."
+    } else {
+        Write-Host 'Nothing to restore.'
+    }
+
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
         Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
         Write-Host "Removed scheduled task '$TaskName'."
     }
 
-    $oldest = Get-ChildItem $BackupDir -Filter '*-FontSubstitutes.reg' -ErrorAction SilentlyContinue |
-        Sort-Object Name | Select-Object -First 1
-    if ($oldest) {
-        $stamp = $oldest.Name -replace '-FontSubstitutes\.reg$', ''
-        # reg import only adds or overwrites, so drop the names this tool manages first;
-        # the import then brings back whichever of them existed originally.
-        $substitutes = Open-HklmKey $SubstitutesSubKey -Writable
-        try {
-            foreach ($set in $FontSets.Values) {
-                foreach ($name in $set.Names) { $substitutes.DeleteValue($name, $false) }
-            }
-        } finally { $substitutes.Close() }
-        foreach ($key in 'FontSubstitutes', 'Fonts') {
-            Invoke-Reg @('import', (Join-Path $BackupDir "$stamp-$key.reg"), '/reg:64')
-        }
-        Write-Host "Restored the font registry from before the first change ($stamp)."
-    } else {
-        Write-Host 'No backups found; the font registry was left as it is.'
-    }
-
-    if (Test-Path $CapabilityMarker) {
-        foreach ($name in Get-Content $CapabilityMarker -Encoding UTF8 | Where-Object { $_ }) {
-            Write-Host "Reinstalling $name (needs an internet connection)..."
-            Add-WindowsCapability -Online -Name $name | Out-Null
-        }
-    }
-
     # Stay out of the folder being deleted when the installed copy itself is running.
     Set-Location $env:SystemRoot
     if (Test-Path $InstallDir) { Remove-Item $InstallDir -Recurse -Force }
-    Write-Host 'Uninstalled. Sign out and back in (or reboot) for the change to take effect.' -ForegroundColor Green
+    Write-Host 'Uninstalled. Reboot for the change to take effect.' -ForegroundColor Green
+}
+
+# Whether the registry is fixed, and whether GDI in this session already renders the target font.
+# The registry can be fixed while rendering is not, until the next reboot.
+function Get-PatchState {
+    $targetNames = Get-FamilyNames $TargetFace
+    $targetFile = Get-MachineFontFile $TargetFace
+    $registryOk = [bool]$targetFile
+    $renderOk = [bool]$targetNames
+    foreach ($set in Get-FontSets) {
+        if (@(Get-RegisteredFontEntries $set.File)) { $registryOk = $false }
+        foreach ($name in $set.Names) {
+            if ((Get-RegValue $SubstitutesSubKey $name) -ne $TargetFace) { $registryOk = $false }
+            if ($targetNames -notcontains (Resolve-GdiFamily $name)) { $renderOk = $false }
+        }
+    }
+    if ($targetFile -and @(Get-LinkFixes $targetFile)) { $registryOk = $false }
+    [pscustomobject]@{
+        RegistryOk = $registryOk
+        RenderOk   = $renderOk -and $registryOk
+        Task       = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    }
 }
 
 function Show-Status {
     $targetNames = Get-FamilyNames $TargetFace
-    if ($targetNames) {
-        Write-Host "Target font : $TargetFace ($($targetNames -join ', '))"
+    $targetFile = Get-MachineFontFile $TargetFace
+    if ($targetFile) {
+        Write-Host "Target font : $TargetFace ($($targetNames -join ', ')) = $targetFile"
     } else {
-        Write-Host "Target font : $TargetFace  -- NOT INSTALLED" -ForegroundColor Red
+        Write-Host "Target font : $TargetFace  -- NOT INSTALLED FOR ALL USERS" -ForegroundColor Red
     }
 
-    $fontsDir = Join-Path $env:WINDIR 'Fonts'
+    $fontsDir = Join-Path $env:SystemRoot 'Fonts'
     $verdictSets = Get-FontSets
     $problems = 0
 
@@ -334,16 +502,17 @@ function Show-Status {
 
         $entries = @(Get-RegisteredFontEntries $set.File)
         if ($entries) {
+            if ($counts) { $problems++ }
             foreach ($entry in $entries) {
-                Write-Host "  Registered : $($entry.Name) = $($entry.Data)  (blocks FontSubstitutes)" -ForegroundColor Yellow
+                Write-Host "  Registered : $($entry.Name) = $($entry.Data)  (wins over substitutes)" -ForegroundColor $(if ($counts) { 'Yellow' } else { 'Gray' })
             }
         } else {
             Write-Host '  Registered : no'
         }
 
-        Write-Host ('  {0,-12} {1,-20} {2}' -f 'Name', 'Substitute', 'GDI renders as')
+        Write-Host ('  {0,-12} {1,-20} {2}' -f 'Name', 'Substitute', 'GDI renders as (this session)')
         foreach ($name in $set.Names) {
-            $substitute = Get-Substitute $name
+            $substitute = Get-RegValue $SubstitutesSubKey $name
             $actual = Resolve-GdiFamily $name
             $ok = $targetNames -contains $actual
             if ($counts -and -not $ok) { $problems++ }
@@ -353,10 +522,21 @@ function Show-Status {
     }
 
     Write-Host ''
+    if ($targetFile) {
+        $links = @(Get-LinkFixes $targetFile)
+        if ($links) {
+            $problems += $links.Count
+            Write-Host "SystemLink  : $($links.Count) chain(s) borrow glyphs from Gulim/Batang before ${TargetFace}:" -ForegroundColor Yellow
+            Write-Host "              $(($links | ForEach-Object { $_.Name }) -join ', ')" -ForegroundColor Yellow
+        } else {
+            Write-Host "SystemLink  : $TargetFace comes before Gulim in every chain"
+        }
+    }
+
     Add-Type -AssemblyName PresentationCore
     $dwrite = @([Windows.Media.Fonts]::SystemFontFamilies | ForEach-Object { $_.Source } |
         Where-Object { $_ -match 'Gulim|Dotum|Batang|Gungsuh' })
-    Write-Host ("DirectWrite : {0}" -f $(if ($dwrite) { 'still lists ' + ($dwrite -join ', ') } else { 'no Gulim/Batang families' }))
+    Write-Host ("DirectWrite : {0}" -f $(if ($dwrite) { 'still lists ' + ($dwrite -join ', ') + ' (Chrome, Edge, Office can use them)' } else { 'no Gulim/Batang families' }))
 
     $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if ($task) {
@@ -367,32 +547,12 @@ function Show-Status {
     }
 
     Write-Host ''
-    if ($problems -eq 0 -and $targetNames) {
-        Write-Host "OK: every checked name renders as $TargetFace." -ForegroundColor Green
+    if ($problems -eq 0 -and $targetFile) {
+        Write-Host "OK: Gulim is replaced by $TargetFace everywhere this tool can check." -ForegroundColor Green
         return 0
     }
-    Write-Host "$problems name(s) do not render as $TargetFace yet. If you just installed, sign out and back in first." -ForegroundColor Red
+    Write-Host "$problems problem(s) found. If you just installed, reboot first." -ForegroundColor Red
     return 1
-}
-
-# Whether the registry is fixed, and whether GDI in this session already renders the target font.
-# The registry can be fixed while rendering is not, until the next sign-in.
-function Get-PatchState {
-    $targetNames = Get-FamilyNames $TargetFace
-    $registryOk = $true
-    $renderOk = [bool]$targetNames
-    foreach ($set in Get-FontSets) {
-        if (@(Get-RegisteredFontEntries $set.File)) { $registryOk = $false }
-        foreach ($name in $set.Names) {
-            if ((Get-Substitute $name) -ne $TargetFace) { $registryOk = $false }
-            if ($targetNames -notcontains (Resolve-GdiFamily $name)) { $renderOk = $false }
-        }
-    }
-    [pscustomobject]@{
-        RegistryOk = $registryOk
-        RenderOk   = $renderOk
-        Task       = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    }
 }
 
 function Show-Menu {
@@ -413,7 +573,7 @@ function Show-Menu {
         if ($state.RenderOk) {
             Write-Host "  Patch      : Applied - $scope renders as $TargetFace" -ForegroundColor Green
         } elseif ($state.RegistryOk) {
-            Write-Host '  Patch      : Applied - sign out and back in to take effect' -ForegroundColor Yellow
+            Write-Host '  Patch      : Applied - reboot to take effect' -ForegroundColor Yellow
         } else {
             Write-Host "  Patch      : Not applied - $scope renders as the original font" -ForegroundColor Red
         }
@@ -426,7 +586,7 @@ function Show-Menu {
         Write-Host ''
         Write-Host '  [1] Install - Gulim only             Apply now and re-apply after every update'
         Write-Host '  [2] Install - Gulim + Batang/Gungsuh Same, and replace Batang/Gungsuh too'
-        Write-Host '  [3] Status                           Show the font each name actually renders as'
+        Write-Host '  [3] Status                           Show what each name and fallback actually uses'
         Write-Host '  [4] Uninstall                        Remove automation and restore the original state'
         Write-Host '  [0] Exit'
         Write-Host ''
@@ -464,28 +624,26 @@ function Show-Menu {
 if ($Action -eq 'Status') { exit (Show-Status) }
 
 if (-not (Test-Admin)) {
-    if ($Quiet) { throw "$Action -Quiet must run elevated." }
-    Invoke-Elevated
-    return
+    if ($Quiet) { Write-Error "$Action -Quiet must run elevated."; exit 1 }
+    exit (Invoke-Elevated)
 }
 
-if ($Action -eq 'Menu') {
-    Show-Menu
-    return
-}
-
+$exitCode = 0
 try {
     switch ($Action) {
+        'Menu'      { Show-Menu }
         'Install'   { Invoke-Install }
         'Uninstall' { Invoke-Uninstall }
         'Apply'     {
-            if ((Invoke-Apply) -and -not $Quiet) { Write-Host 'Sign out and back in (or reboot) so running apps pick up the change.' }
+            if ((Invoke-Apply) -and -not $Quiet) { Write-Host 'Reboot so Windows and running apps pick up the change.' }
         }
     }
 } catch {
+    $exitCode = 1
     if (Test-Path (Split-Path $LogFile -Parent)) { Add-Content -Path $LogFile -Value "ERROR $_" -Encoding UTF8 }
     Write-Host "ERROR: $_" -ForegroundColor Red
-    if (-not $Elevated) { throw }
 } finally {
-    if ($Elevated) { [void](Read-Host 'Press Enter to close') }
+    # Keep an elevated window open so its output can be read; the menu waits on its own.
+    if ($Elevated -and ($Action -ne 'Menu' -or $exitCode -ne 0)) { [void](Read-Host 'Press Enter to close') }
 }
+exit $exitCode
