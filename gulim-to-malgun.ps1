@@ -465,7 +465,9 @@ function Invoke-Uninstall {
             } elseif ($entry.Key -eq $FontsSubKey -and -not (Test-Path (Join-Path $fontsDir ([IO.Path]::GetFileName([string]$entry.Data))))) {
                 Write-Host "Skipped re-registering $($entry.Name): $($entry.Data) is not in $fontsDir." -ForegroundColor Yellow
             } else {
-                $data = if ($entry.Kind -eq 'MultiString') { [string[]]@($entry.Data) } else { $entry.Data }
+                # Not '$data = if ...': that unrolls the array into Object[], which SetValue rejects for MultiString.
+                $data = $entry.Data
+                if ($entry.Kind -eq 'MultiString') { $data = [string[]]@($entry.Data) }
                 $key.SetValue($entry.Name, $data, [Microsoft.Win32.RegistryValueKind]$entry.Kind)
             }
         } finally { $key.Close() }
