@@ -2,7 +2,8 @@
 .SYNOPSIS
     Makes Gulim (굴림) render as Malgun Gothic (맑은 고딕) and keeps it that way after Windows updates.
 .DESCRIPTION
-    Install    (default) Apply the fix now and re-apply it at every startup and sign-in.
+    Menu       (default) Numbered menu with the current patch state at the top.
+    Install    Apply the fix now and re-apply it at every startup and sign-in.
     Uninstall  Remove the automation and put the font registry back the way it was.
     Status     Show what Gulim renders as right now, and why. Read-only, no admin needed.
     Apply      Apply once without installing anything. The scheduled task runs this.
@@ -22,13 +23,13 @@
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\gulim-to-malgun.ps1
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File .\gulim-to-malgun.ps1 Uninstall
+    powershell -ExecutionPolicy Bypass -File .\gulim-to-malgun.ps1 Install
 #>
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('Install', 'Uninstall', 'Status', 'Apply')]
-    [string]$Action = 'Install',
+    [ValidateSet('Menu', 'Install', 'Uninstall', 'Status', 'Apply')]
+    [string]$Action = 'Menu',
     [string]$TargetFace = 'Malgun Gothic',
     [switch]$IncludeBatang,
     [switch]$RemoveCapability,
@@ -374,6 +375,73 @@ function Show-Status {
     return 1
 }
 
+# Whether the registry is fixed, and whether GDI in this session already renders the target font.
+# The registry can be fixed while rendering is not, until the next sign-in.
+function Get-PatchState {
+    $targetNames = Get-FamilyNames $TargetFace
+    $registryOk = $true
+    $renderOk = [bool]$targetNames
+    foreach ($set in Get-FontSets) {
+        if (@(Get-RegisteredFontEntries $set.File)) { $registryOk = $false }
+        foreach ($name in $set.Names) {
+            if ((Get-Substitute $name) -ne $TargetFace) { $registryOk = $false }
+            if ($targetNames -notcontains (Resolve-GdiFamily $name)) { $renderOk = $false }
+        }
+    }
+    [pscustomobject]@{
+        RegistryOk = $registryOk
+        RenderOk   = $renderOk
+        Task       = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    }
+}
+
+function Show-Menu {
+    while ($true) {
+        Clear-Host
+        $state = Get-PatchState
+        Write-Host "  gulim-to-malgun  |  굴림 -> $TargetFace"
+        Write-Host '  ------------------------------------------------'
+        if ($state.RenderOk) {
+            Write-Host "  패치 상태 : 적용됨 - 굴림이 $TargetFace(으)로 표시됩니다" -ForegroundColor Green
+        } elseif ($state.RegistryOk) {
+            Write-Host '  패치 상태 : 적용됨 - 로그아웃 후 다시 로그인하면 반영됩니다' -ForegroundColor Yellow
+        } else {
+            Write-Host '  패치 상태 : 적용 안 됨 - 굴림이 그대로 표시됩니다' -ForegroundColor Red
+        }
+        if ($state.Task) {
+            $info = $state.Task | Get-ScheduledTaskInfo
+            Write-Host "  자동 유지 : 설치됨 (마지막 실행 $($info.LastRunTime))" -ForegroundColor Green
+        } else {
+            Write-Host '  자동 유지 : 설치 안 됨 - 업데이트 후 굴림이 다시 나올 수 있습니다' -ForegroundColor Yellow
+        }
+        Write-Host ''
+        Write-Host '  [1] 설치   지금 적용 + 업데이트 후에도 자동으로 다시 적용'
+        Write-Host '  [2] 상태   이름별로 실제 표시되는 글꼴 자세히 보기'
+        Write-Host '  [3] 제거   자동 유지 해제 + 원래 상태로 복원'
+        Write-Host '  [0] 종료'
+        Write-Host ''
+        $choice = Read-Host '  번호 선택'
+        if ($choice -eq '0' -or $choice -eq '') { return }
+        if ($choice -notin '1', '2', '3') { continue }
+
+        Write-Host ''
+        try {
+            switch ($choice) {
+                '1' { Invoke-Install }
+                '2' { [void](Show-Status) }
+                '3' {
+                    if ((Read-Host '  자동 유지를 해제하고 원래 상태로 되돌릴까요? (y/N)') -eq 'y') { Invoke-Uninstall }
+                }
+            }
+        } catch {
+            if (Test-Path (Split-Path $LogFile -Parent)) { Add-Content -Path $LogFile -Value "ERROR $_" -Encoding UTF8 }
+            Write-Host "ERROR: $_" -ForegroundColor Red
+        }
+        Write-Host ''
+        [void](Read-Host '  Enter를 누르면 메뉴로 돌아갑니다')
+    }
+}
+
 #endregion
 
 if ($Action -eq 'Status') { exit (Show-Status) }
@@ -381,6 +449,11 @@ if ($Action -eq 'Status') { exit (Show-Status) }
 if (-not (Test-Admin)) {
     if ($Quiet) { throw "$Action -Quiet must run elevated." }
     Invoke-Elevated
+    return
+}
+
+if ($Action -eq 'Menu') {
+    Show-Menu
     return
 }
 

@@ -5,21 +5,32 @@ Install once; it re-applies itself automatically.
 
 ## Install
 
-In PowerShell, from this folder:
+Double-click `gulim-to-malgun.cmd` and approve the administrator prompt. A menu opens with the
+current patch state at the top:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\gulim-to-malgun.ps1
+```
+  gulim-to-malgun  |  굴림 -> Malgun Gothic
+  ------------------------------------------------
+  패치 상태 : 적용 안 됨 - 굴림이 그대로 표시됩니다
+  자동 유지 : 설치 안 됨 - 업데이트 후 굴림이 다시 나올 수 있습니다
+
+  [1] 설치   지금 적용 + 업데이트 후에도 자동으로 다시 적용
+  [2] 상태   이름별로 실제 표시되는 글꼴 자세히 보기
+  [3] 제거   자동 유지 해제 + 원래 상태로 복원
+  [0] 종료
 ```
 
-Approve the administrator prompt, then sign out and back in. That's it: the fix is applied now and
-again at every startup and sign-in, so an update can only bring Gulim back until the next reboot.
+Choose `1`, then sign out and back in. That's it: the fix is applied now and again at every startup
+and sign-in, so an update can only bring Gulim back until the next reboot. Open the menu again any
+time to see whether the patch is in effect.
+
+The same actions work without the menu:
 
 ```powershell
-.\gulim-to-malgun.ps1 Status      # what Gulim renders as right now, and why (no admin needed)
-.\gulim-to-malgun.ps1 Uninstall   # remove the automation and restore the original font registry
+powershell -ExecutionPolicy Bypass -File .\gulim-to-malgun.ps1 Install
+powershell -ExecutionPolicy Bypass -File .\gulim-to-malgun.ps1 Status      # no admin needed
+powershell -ExecutionPolicy Bypass -File .\gulim-to-malgun.ps1 Uninstall
 ```
-
-(Prefix with `powershell -ExecutionPolicy Bypass -File` if script execution is disabled.)
 
 ## Why the old registry trick stops working
 
