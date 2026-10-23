@@ -16,14 +16,14 @@ current patch state at the top:
 
   [1] Install - Gulim only             Apply now and re-apply after every update
   [2] Install - Gulim + Batang/Gungsuh Same, and replace Batang/Gungsuh too
-  [3] Status                           Show the font each name actually renders as
+  [3] Status                           Show what each name and fallback actually uses
   [4] Uninstall                        Remove automation and restore the original state
   [0] Exit
 ```
 
-Choose `1` (or `2` to also replace Batang and Gungsuh), then sign out and back in. That's it: the fix is applied now and again at every startup
-and sign-in, so an update can only bring Gulim back until the next reboot. Open the menu again any
-time to see whether the patch is in effect.
+Choose `1` (or `2` to also replace Batang and Gungsuh), then **reboot**. That's it: the fix is
+applied now and again at every startup and sign-in. Open the menu again any time to see whether the
+patch is in effect.
 
 The same actions work without the menu:
 
@@ -33,42 +33,53 @@ powershell -ExecutionPolicy Bypass -File .\gulim-to-malgun.ps1 Status      # no 
 powershell -ExecutionPolicy Bypass -File .\gulim-to-malgun.ps1 Uninstall
 ```
 
-## Why the old registry trick stops working
+## How Gulim reaches the screen
 
-The usual fix is to map Gulim to another font under
-`HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\FontSubstitutes`.
-GDI only honours a substitute for a name that is **not installed**, though, and cumulative
-updates re-register `gulim.ttc` under `...\CurrentVersion\Fonts`:
+Mapping Gulim to another font under `HKLM\...\CurrentVersion\FontSubstitutes` is the usual fix,
+and it is not enough on its own. Gulim gets in three ways:
 
-```
-Gulim & GulimChe & Dotum & DotumChe (TrueType) = gulim.ttc
-```
-
-Once that value is back, `굴림`, `굴림체`, `돋움` and `돋움체` resolve to the real Gulim again and the
-substitutes are silently ignored, even though they are still in the registry.
+1. **By name.** While `gulim.ttc` is registered under `...\CurrentVersion\Fonts`
+   (`Gulim & GulimChe & Dotum & DotumChe (TrueType) = gulim.ttc`), a request for `굴림` gets the real
+   Gulim: GDI lets the installed font win over the substitute for the Korean names, and DirectWrite
+   apps (Chrome, Edge, Office) ignore FontSubstitutes entirely. Only removing the registration
+   stops this.
+2. **By font linking.** `...\FontLink\SystemLink` makes Tahoma, Microsoft Sans Serif, Lucida Sans
+   Unicode and the MS Gothic family borrow missing glyphs from `GULIM.TTC` by file name, so Hanja and
+   kana inside Korean text come out in Gulim even when the text font is something else.
+3. **By default face.** Names that are not installed fall through to the Korean default face, Gulim,
+   and from there through FontSubstitutes.
 
 ## What it does
 
-- Removes that registration (the font file stays where it is) and points every Gulim/Dotum name at
-  Malgun Gothic. Does nothing when both are already in place.
-- Backs up both registry keys before any change; `Uninstall` restores the oldest backup, i.e. the
-  state before the first change.
+- Removes the `gulim.ttc` registration (the font file stays where it is).
+- Points all eight Gulim/Dotum names (English and Korean) at Malgun Gothic in FontSubstitutes.
+- Inserts Malgun Gothic ahead of Gulim in every SystemLink chain that would reach Gulim first, in the
+  same scaled + unscaled pair Windows uses for Segoe UI. Existing entries are kept.
 - Copies itself to `C:\Program Files\gulim-to-malgun` and registers the scheduled task
-  `gulim-to-malgun`, which runs that copy as SYSTEM at startup and sign-in. The copy lives where only
-  administrators can change it because it runs as SYSTEM. Backups and `logs\apply.log` are kept there too.
+  `gulim-to-malgun`, which runs that copy as SYSTEM at startup and sign-in and changes only what an
+  update has put back. The copy lives where only administrators can change it because it runs as
+  SYSTEM.
+- Records the original of every value it changes in `original-values.json` before changing it.
+  `Uninstall` puts back exactly those values and nothing else. Whole-key `.reg` exports from before the
+  first change are kept in `backup\` for manual recovery, and changes are logged in `logs\apply.log`.
 
-Options for `Install` from the command line (they are remembered by the scheduled task; menu item `2` is `-IncludeBatang`):
+Options for `Install` from the command line (menu item `2` is `-IncludeBatang`):
 
-- `-TargetFace "NanumBarunGothic"` - render Gulim as another installed font instead.
+- `-TargetFace "NanumBarunGothic"` - use another font installed for all users instead.
 - `-IncludeBatang` - also replace Batang, BatangChe, Gungsuh and GungsuhChe (바탕, 궁서).
 - `-RemoveCapability` - also uninstall the *Korean Supplemental Fonts* Windows feature, which
-  deletes `gulim.ttc` and `batang.ttc`. Heavier; only needed if Gulim still shows up after the
-  registry fix. `Uninstall` reinstalls it (needs an internet connection).
+  deletes `gulim.ttc` and `batang.ttc`. The most thorough option, but it removes the fixed-width
+  GulimChe/BatangChe and the serif Batang/Gungsuh for good, and updates may reinstall the feature.
+  Done only during an interactive install, never by the scheduled task. `Uninstall` reinstalls it
+  first (needs an internet connection).
 
 ## Limits
 
-- Running apps keep the fonts they loaded at sign-in; sign out and back in after installing.
-- When an update re-registers Gulim, the first session after that reboot may still show it if
-  sign-in finishes before the startup task runs. The next sign-in is fixed.
-- Web pages that ask for `굴림` fall back to the browser's default font once Gulim is
-  unregistered; set that default to Malgun Gothic in the browser if it is something else.
+- GDI reads fonts, substitutes and font links when the session starts. Reboot after installing or
+  uninstalling.
+- After an update re-registers Gulim, the task fixes the registry at the next startup, but the
+  session that started alongside it may still show Gulim. The reboot after that is fixed.
+- GulimChe and DotumChe are fixed-width; Malgun Gothic is not, so text aligned in columns with them
+  may shift.
+- Web pages that ask for `굴림` fall back to the browser's default font once Gulim is unregistered;
+  set that default to Malgun Gothic in the browser if it is something else.
