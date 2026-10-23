@@ -154,14 +154,21 @@ function Write-Log([string]$Message) {
     Write-Host $Message
 }
 
+# Runs reg.exe outside PowerShell's stream handling: it prints success messages to stderr,
+# which Windows PowerShell 5.1 turns into terminating errors under ErrorActionPreference Stop.
+function Invoke-Reg([string[]]$Arguments) {
+    $quoted = $Arguments | ForEach-Object { if ($_ -match '\s') { "`"$_`"" } else { $_ } }
+    $process = Start-Process reg.exe -ArgumentList $quoted -Wait -PassThru -WindowStyle Hidden
+    if ($process.ExitCode -ne 0) { throw "reg.exe $($Arguments -join ' ') failed with exit code $($process.ExitCode)" }
+}
+
 # Exports both font keys to backup\<timestamp>-<key>.reg. Returns the timestamp.
 function Backup-FontKeys {
     if (-not (Test-Path $BackupDir)) { New-Item -ItemType Directory -Path $BackupDir -Force | Out-Null }
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     foreach ($pair in @(@('FontSubstitutes', $SubstitutesSubKey), @('Fonts', $FontsSubKey))) {
         $file = Join-Path $BackupDir "$stamp-$($pair[0]).reg"
-        & reg.exe export "HKLM\$($pair[1])" $file /y /reg:64 | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "reg export failed for $($pair[1])" }
+        Invoke-Reg @('export', "HKLM\$($pair[1])", $file, '/y', '/reg:64')
     }
     return $stamp
 }

@@ -39,10 +39,7 @@ try {
         }
     } finally { $substitutes.Close() }
 
-    foreach ($file in $files) {
-        & reg.exe import $file /reg:64 2>$null
-        if ($LASTEXITCODE -ne 0) { throw "reg import failed for $file" }
-    }
+    foreach ($file in $files) { Invoke-Reg @('import', $file, '/reg:64') }
     Write-Log "Restored font registry keys from backup $Stamp"
 
     if ($AddCapability) {
