@@ -19,7 +19,8 @@
       through FontSubstitutes, which now points at the target font.
     GDI reads all of this when the session starts, so changes show up after a reboot.
 .PARAMETER TargetFace
-    Font to render instead. Must be installed for all users. Defaults to Malgun Gothic.
+    Font to render instead. Must be installed for all users. Defaults to Malgun Gothic, or for
+    Status and the menu, to the installed one. Font linking always uses Malgun Gothic.
 .PARAMETER IncludeBatang
     Also replace Batang, BatangChe, Gungsuh and GungsuhChe (바탕, 궁서).
 .PARAMETER RemoveCapability
@@ -51,6 +52,13 @@ $FontSets = [ordered]@{
     Batang = @{ File = 'batang.ttc'; Names = @('Batang', 'BatangChe', 'Gungsuh', 'GungsuhChe', '바탕', '바탕체', '궁서', '궁서체') }
 }
 
+# Fonts the menu offers as the target. Any font installed for all users works with -TargetFace.
+$FaceChoices = @('Malgun Gothic', 'NanumBarunGothic')
+
+# Font linking always borrows from Malgun Gothic, whatever the target: it ships with Windows, covers
+# more Hanja than most targets, and switching targets then never rewrites SystemLink again.
+$LinkFace = 'Malgun Gothic'
+
 $SubstitutesSubKey = 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\FontSubstitutes'
 $FontsSubKey       = 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts'
 $SystemLinkSubKey  = 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\FontLink\SystemLink'
@@ -69,6 +77,8 @@ $JournalFile       = Join-Path $InstallDir 'original-values.json'
 $BackupDir         = Join-Path $InstallDir 'backup'
 $LogFile           = Join-Path $InstallDir 'logs\apply.log'
 $CapabilityMarker  = Join-Path $InstallDir 'capability-removed.txt'
+# What the installed task applies. Readable without admin rights, unlike the task itself.
+$SettingsFile      = Join-Path $InstallDir 'settings.json'
 
 # Kept in memory so Install still works after Uninstall deleted the installed copy this runs from.
 $SelfText          = [IO.File]::ReadAllText($PSCommandPath)
@@ -129,15 +139,15 @@ function Get-MachineFontFile([string]$Face) {
     return $null
 }
 
-# SystemLink chains that would borrow glyphs from Gulim (or Batang) before the target font,
-# with the chain they should have instead: the target inserted just ahead of the first such entry,
+# SystemLink chains that would borrow glyphs from Gulim (or Batang) before $LinkFace,
+# with the chain they should have instead: $LinkFace inserted just ahead of the first such entry,
 # in the scaled + unscaled pair Windows itself uses for Segoe UI.
-function Get-LinkFixes([string]$TargetFile) {
+function Get-LinkFixes([string]$LinkFile) {
     $blocked = @(Get-FontSets | ForEach-Object { $_.File })
     $key = Open-HklmKey $SystemLinkSubKey
     try {
         foreach ($name in $key.GetValueNames()) {
-            if ($name -like "$TargetFace*") { continue }
+            if ($name -like "$LinkFace*") { continue }
             if ($key.GetValueKind($name) -ne 'MultiString') { continue }
             $chain = @($key.GetValue($name))
             $blockedAt = -1
@@ -145,7 +155,7 @@ function Get-LinkFixes([string]$TargetFile) {
             for ($i = 0; $i -lt $chain.Count; $i++) {
                 $file = ($chain[$i] -split ',')[0].Trim()
                 if ($blockedAt -lt 0 -and $blocked -contains $file) { $blockedAt = $i }
-                if ($targetAt -lt 0 -and $file -ieq $TargetFile) { $targetAt = $i }
+                if ($targetAt -lt 0 -and $file -ieq $LinkFile) { $targetAt = $i }
             }
             if ($blockedAt -lt 0) { continue }
             if ($targetAt -ge 0 -and $targetAt -lt $blockedAt) { continue }
@@ -153,8 +163,8 @@ function Get-LinkFixes([string]$TargetFile) {
             $fixed = New-Object System.Collections.Generic.List[string]
             for ($i = 0; $i -lt $chain.Count; $i++) {
                 if ($i -eq $blockedAt) {
-                    $fixed.Add("$($TargetFile.ToUpper()),$TargetFace,128,96")
-                    $fixed.Add("$($TargetFile.ToUpper()),$TargetFace")
+                    $fixed.Add("$($LinkFile.ToUpper()),$LinkFace,128,96")
+                    $fixed.Add("$($LinkFile.ToUpper()),$LinkFace")
                 }
                 $fixed.Add($chain[$i])
             }
@@ -224,6 +234,22 @@ namespace GulimToMalgun {
 '@
     }
     return [GulimToMalgun.Gdi]::Resolve($Face)
+}
+
+# The target and scope the installed task applies, or $null when not installed.
+# Installs from before settings.json only have the task's arguments, which need admin rights to read.
+function Get-InstalledOptions {
+    if (Test-Path $SettingsFile) {
+        $settings = Get-Content $SettingsFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        return [pscustomobject]@{ TargetFace = [string]$settings.TargetFace; IncludeBatang = [bool]$settings.IncludeBatang }
+    }
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if (-not $task) { return $null }
+    $arguments = $task.Actions[0].Arguments
+    [pscustomobject]@{
+        TargetFace    = $(if ($arguments -match '-TargetFace "([^"]+)"') { $Matches[1] } else { 'Malgun Gothic' })
+        IncludeBatang = $arguments -match '-IncludeBatang'
+    }
 }
 
 function Test-Admin {
@@ -336,7 +362,8 @@ function Invoke-Apply {
             $steps += [pscustomobject]@{ Kind = 'Unregister'; Name = $entry.Name; From = $entry.Data }
         }
     }
-    foreach ($fix in Get-LinkFixes $targetFile) {
+    $linkFile = Get-MachineFontFile $LinkFace
+    foreach ($fix in $(if ($linkFile) { Get-LinkFixes $linkFile })) {
         $steps += [pscustomobject]@{ Kind = 'Link'; Name = $fix.Name; From = $fix.Blocked; Chain = $fix.Chain }
     }
 
@@ -376,7 +403,7 @@ function Invoke-Apply {
             }
             'Link' {
                 Set-JournaledValue $journal $SystemLinkSubKey $step.Name $step.Chain 'MultiString'
-                Write-Log "Link        $($step.Name): $TargetFace ahead of $($step.From)"
+                Write-Log "Link        $($step.Name): $LinkFace ahead of $($step.From)"
             }
         }
     }
@@ -406,7 +433,9 @@ function Invoke-Install {
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
         -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
     Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $triggers -Principal $principal `
-        -Settings $settings -Description 'Keeps Gulim rendering as Malgun Gothic after Windows updates.' -Force | Out-Null
+        -Settings $settings -Description "Keeps Gulim rendering as $TargetFace after Windows updates." -Force | Out-Null
+    $json = ConvertTo-Json @{ TargetFace = $TargetFace; IncludeBatang = [bool]$IncludeBatang }
+    [IO.File]::WriteAllText($SettingsFile, $json, (New-Object Text.UTF8Encoding $false))
 
     Write-Host ''
     Write-Host 'Installed. The fix is re-applied automatically at every startup and sign-in.' -ForegroundColor Green
@@ -472,7 +501,8 @@ function Get-PatchState {
             if ($targetNames -notcontains (Resolve-GdiFamily $name)) { $renderOk = $false }
         }
     }
-    if ($targetFile -and @(Get-LinkFixes $targetFile)) { $registryOk = $false }
+    $linkFile = Get-MachineFontFile $LinkFace
+    if ($linkFile -and @(Get-LinkFixes $linkFile)) { $registryOk = $false }
     [pscustomobject]@{
         RegistryOk = $registryOk
         RenderOk   = $renderOk -and $registryOk
@@ -522,14 +552,15 @@ function Show-Status {
     }
 
     Write-Host ''
-    if ($targetFile) {
-        $links = @(Get-LinkFixes $targetFile)
+    $linkFile = Get-MachineFontFile $LinkFace
+    if ($linkFile) {
+        $links = @(Get-LinkFixes $linkFile)
         if ($links) {
             $problems += $links.Count
-            Write-Host "SystemLink  : $($links.Count) chain(s) borrow glyphs from Gulim/Batang before ${TargetFace}:" -ForegroundColor Yellow
+            Write-Host "SystemLink  : $($links.Count) chain(s) borrow glyphs from Gulim/Batang before ${LinkFace}:" -ForegroundColor Yellow
             Write-Host "              $(($links | ForEach-Object { $_.Name }) -join ', ')" -ForegroundColor Yellow
         } else {
-            Write-Host "SystemLink  : $TargetFace comes before Gulim in every chain"
+            Write-Host "SystemLink  : $LinkFace comes before Gulim in every chain"
         }
     }
 
@@ -538,12 +569,17 @@ function Show-Status {
         Where-Object { $_ -match 'Gulim|Dotum|Batang|Gungsuh' })
     Write-Host ("DirectWrite : {0}" -f $(if ($dwrite) { 'still lists ' + ($dwrite -join ', ') + ' (Chrome, Edge, Office can use them)' } else { 'no Gulim/Batang families' }))
 
+    # Without admin rights a task running as SYSTEM can't be read, so it looks the same as no task.
     $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if ($task) {
         $info = $task | Get-ScheduledTaskInfo
         Write-Host "Automation  : installed, last run $($info.LastRunTime), result $($info.LastTaskResult)"
-    } else {
+    } elseif (Test-Admin) {
         Write-Host 'Automation  : not installed'
+    } elseif (Test-Path $SettingsFile) {
+        Write-Host 'Automation  : installed (run as administrator for the last run time)'
+    } else {
+        Write-Host 'Automation  : unknown (run as administrator to check)'
     }
 
     Write-Host ''
@@ -555,17 +591,51 @@ function Show-Status {
     return 1
 }
 
+# Lists $FaceChoices with whether each is installed for all users, and returns the one picked
+# ($null for Back, or for a font the scheduled task could not use).
+function Select-TargetFace {
+    Write-Host '  Render Gulim as:'
+    for ($i = 0; $i -lt $FaceChoices.Count; $i++) {
+        $face = $FaceChoices[$i]
+        $names = @(Get-FamilyNames $face)
+        $state = if (Get-MachineFontFile $face) { 'installed' }
+                 elseif ($names) { 'installed for this user only' }
+                 else { 'not installed' }
+        if ($face -eq $TargetFace) { $state += ', current' }
+        $localName = $names | Where-Object { $_ -ne $face } | Select-Object -First 1
+        Write-Host ('  [{0}] {1,-18} {2,-34} {3}' -f ($i + 1), $face, $state, $localName) `
+            -ForegroundColor $(if ($state -like 'installed*' -and $state -notlike '*user only*') { 'Gray' } else { 'DarkGray' })
+    }
+    Write-Host '  [0] Back'
+    Write-Host ''
+    $choice = Read-Host '  Select'
+    $index = 0
+    if (-not [int]::TryParse($choice, [ref]$index) -or $index -lt 1 -or $index -gt $FaceChoices.Count) { return $null }
+    $face = $FaceChoices[$index - 1]
+    if (-not (Get-MachineFontFile $face)) {
+        Write-Host ''
+        Write-Host "  $face is not installed for all users, so the startup task could not use it." -ForegroundColor Yellow
+        Write-Host '  Install it first: right-click the .ttf file > Show more options > Install for all users.' -ForegroundColor Yellow
+        return $null
+    }
+    return $face
+}
+
 function Show-Menu {
     $requestedBatang = [bool]$IncludeBatang
+    $requestedFace = $TargetFace
     while ($true) {
         Clear-Host
         # Judge the patch by what is installed: Batang counts only if the task replaces it too.
-        $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-        if ($task) {
-            $script:IncludeBatang = $task.Actions[0].Arguments -match '-IncludeBatang'
+        $installed = Get-InstalledOptions
+        if ($installed) {
+            $script:IncludeBatang = $installed.IncludeBatang
+            $script:TargetFace = $installed.TargetFace
         } else {
             $script:IncludeBatang = $requestedBatang
+            $script:TargetFace = $requestedFace
         }
+        $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
         $scope = if ($IncludeBatang) { 'Gulim + Batang/Gungsuh' } else { 'Gulim' }
         $state = Get-PatchState
         Write-Host "  gulim-to-malgun  |  $scope -> $TargetFace"
@@ -588,11 +658,12 @@ function Show-Menu {
         Write-Host '  [2] Install - Gulim + Batang/Gungsuh Same, and replace Batang/Gungsuh too'
         Write-Host '  [3] Status                           Show what each name and fallback actually uses'
         Write-Host '  [4] Uninstall                        Remove automation and restore the original state'
+        Write-Host ('  [5] Font - {0,-26} Choose the font Gulim renders as' -f $TargetFace)
         Write-Host '  [0] Exit'
         Write-Host ''
         $choice = Read-Host '  Select'
         if ($choice -eq '0' -or $choice -eq '') { return }
-        if ($choice -notin '1', '2', '3', '4') { continue }
+        if ($choice -notin '1', '2', '3', '4', '5') { continue }
 
         Write-Host ''
         try {
@@ -600,7 +671,7 @@ function Show-Menu {
                 '1' {
                     # Switching from Gulim + Batang back to Gulim only: start from the original state
                     # so Batang is not left replaced without the task maintaining it.
-                    if ($IncludeBatang -and $task) { Invoke-Uninstall; Write-Host '' }
+                    if ($IncludeBatang -and $installed) { Invoke-Uninstall; Write-Host '' }
                     $script:IncludeBatang = $false
                     Invoke-Install
                 }
@@ -608,6 +679,22 @@ function Show-Menu {
                 '3' { [void](Show-Status) }
                 '4' {
                     if ((Read-Host '  Remove automation and restore the original state? (y/N)') -eq 'y') { Invoke-Uninstall }
+                }
+                '5' {
+                    $face = Select-TargetFace
+                    if ($face -and $face -ne $TargetFace) {
+                        $requestedFace = $face
+                        $script:TargetFace = $face
+                        # Installed: switch now, keeping the scope. Only FontSubstitutes changes;
+                        # the journal already holds the values from before the first change.
+                        if ($installed) {
+                            Write-Host ''
+                            Invoke-Install
+                        } else {
+                            Write-Host ''
+                            Write-Host "  $face selected. Install with [1] or [2] to apply it."
+                        }
+                    }
                 }
             }
         } catch {
@@ -621,7 +708,13 @@ function Show-Menu {
 
 #endregion
 
-if ($Action -eq 'Status') { exit (Show-Status) }
+if ($Action -eq 'Status') {
+    # Check what is installed, unless the command line asks about something else.
+    $installed = Get-InstalledOptions
+    if ($installed -and -not $PSBoundParameters.ContainsKey('TargetFace')) { $TargetFace = $installed.TargetFace }
+    if ($installed -and -not $PSBoundParameters.ContainsKey('IncludeBatang')) { $IncludeBatang = [switch]$installed.IncludeBatang }
+    exit (Show-Status)
+}
 
 if (-not (Test-Admin)) {
     if ($Quiet) { Write-Error "$Action -Quiet must run elevated."; exit 1 }
