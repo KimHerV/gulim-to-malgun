@@ -11,16 +11,17 @@ current patch state at the top:
 ```
   gulim-to-malgun  |  굴림 -> Malgun Gothic
   ------------------------------------------------
-  패치 상태 : 적용 안 됨 - 굴림이 그대로 표시됩니다
+  패치 상태 : 적용 안 됨 - 원래 글꼴(굴림)로 표시됩니다
   자동 유지 : 설치 안 됨 - 업데이트 후 굴림이 다시 나올 수 있습니다
 
-  [1] 설치   지금 적용 + 업데이트 후에도 자동으로 다시 적용
-  [2] 상태   이름별로 실제 표시되는 글꼴 자세히 보기
-  [3] 제거   자동 유지 해제 + 원래 상태로 복원
+  [1] 설치 - 굴림만             지금 적용 + 업데이트 후에도 자동으로 다시 적용
+  [2] 설치 - 굴림 + 바탕·궁서   위와 같고, 바탕·궁서도 함께 바꿈
+  [3] 상태   이름별로 실제 표시되는 글꼴 자세히 보기
+  [4] 제거   자동 유지 해제 + 원래 상태로 복원
   [0] 종료
 ```
 
-Choose `1`, then sign out and back in. That's it: the fix is applied now and again at every startup
+Choose `1` (or `2` to also replace Batang and Gungsuh), then sign out and back in. That's it: the fix is applied now and again at every startup
 and sign-in, so an update can only bring Gulim back until the next reboot. Open the menu again any
 time to see whether the patch is in effect.
 
@@ -56,7 +57,7 @@ substitutes are silently ignored, even though they are still in the registry.
   `gulim-to-malgun`, which runs that copy as SYSTEM at startup and sign-in. The copy lives where only
   administrators can change it because it runs as SYSTEM. Backups and `logs\apply.log` are kept there too.
 
-Options for install (they are remembered by the scheduled task):
+Options for `Install` from the command line (they are remembered by the scheduled task; menu item `2` is `-IncludeBatang`):
 
 - `-TargetFace "NanumBarunGothic"` - render Gulim as another installed font instead.
 - `-IncludeBatang` - also replace Batang, BatangChe, Gungsuh and GungsuhChe (바탕, 궁서).

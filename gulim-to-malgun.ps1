@@ -396,40 +396,57 @@ function Get-PatchState {
 }
 
 function Show-Menu {
+    $requestedBatang = [bool]$IncludeBatang
     while ($true) {
         Clear-Host
+        # Judge the patch by what is installed: Batang counts only if the task replaces it too.
+        $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        if ($task) {
+            $script:IncludeBatang = $task.Actions[0].Arguments -match '-IncludeBatang'
+        } else {
+            $script:IncludeBatang = $requestedBatang
+        }
+        $scope = if ($IncludeBatang) { '굴림 + 바탕·궁서' } else { '굴림' }
         $state = Get-PatchState
-        Write-Host "  gulim-to-malgun  |  굴림 -> $TargetFace"
+        Write-Host "  gulim-to-malgun  |  $scope -> $TargetFace"
         Write-Host '  ------------------------------------------------'
         if ($state.RenderOk) {
-            Write-Host "  패치 상태 : 적용됨 - 굴림이 $TargetFace(으)로 표시됩니다" -ForegroundColor Green
+            Write-Host "  패치 상태 : 적용됨 - $scope 모두 $TargetFace(으)로 표시됩니다" -ForegroundColor Green
         } elseif ($state.RegistryOk) {
             Write-Host '  패치 상태 : 적용됨 - 로그아웃 후 다시 로그인하면 반영됩니다' -ForegroundColor Yellow
         } else {
-            Write-Host '  패치 상태 : 적용 안 됨 - 굴림이 그대로 표시됩니다' -ForegroundColor Red
+            Write-Host "  패치 상태 : 적용 안 됨 - 원래 글꼴($scope)로 표시됩니다" -ForegroundColor Red
         }
         if ($state.Task) {
             $info = $state.Task | Get-ScheduledTaskInfo
-            Write-Host "  자동 유지 : 설치됨 (마지막 실행 $($info.LastRunTime))" -ForegroundColor Green
+            Write-Host "  자동 유지 : 설치됨 - $scope (마지막 실행 $($info.LastRunTime))" -ForegroundColor Green
         } else {
             Write-Host '  자동 유지 : 설치 안 됨 - 업데이트 후 굴림이 다시 나올 수 있습니다' -ForegroundColor Yellow
         }
         Write-Host ''
-        Write-Host '  [1] 설치   지금 적용 + 업데이트 후에도 자동으로 다시 적용'
-        Write-Host '  [2] 상태   이름별로 실제 표시되는 글꼴 자세히 보기'
-        Write-Host '  [3] 제거   자동 유지 해제 + 원래 상태로 복원'
+        Write-Host '  [1] 설치 - 굴림만             지금 적용 + 업데이트 후에도 자동으로 다시 적용'
+        Write-Host '  [2] 설치 - 굴림 + 바탕·궁서   위와 같고, 바탕·궁서도 함께 바꿈'
+        Write-Host '  [3] 상태   이름별로 실제 표시되는 글꼴 자세히 보기'
+        Write-Host '  [4] 제거   자동 유지 해제 + 원래 상태로 복원'
         Write-Host '  [0] 종료'
         Write-Host ''
         $choice = Read-Host '  번호 선택'
         if ($choice -eq '0' -or $choice -eq '') { return }
-        if ($choice -notin '1', '2', '3') { continue }
+        if ($choice -notin '1', '2', '3', '4') { continue }
 
         Write-Host ''
         try {
             switch ($choice) {
-                '1' { Invoke-Install }
-                '2' { [void](Show-Status) }
-                '3' {
+                '1' {
+                    # Switching from Gulim + Batang back to Gulim only: start from the original state
+                    # so Batang is not left replaced without the task maintaining it.
+                    if ($IncludeBatang -and $task) { Invoke-Uninstall; Write-Host '' }
+                    $script:IncludeBatang = $false
+                    Invoke-Install
+                }
+                '2' { $script:IncludeBatang = $true; Invoke-Install }
+                '3' { [void](Show-Status) }
+                '4' {
                     if ((Read-Host '  자동 유지를 해제하고 원래 상태로 되돌릴까요? (y/N)') -eq 'y') { Invoke-Uninstall }
                 }
             }
