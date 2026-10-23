@@ -406,31 +406,31 @@ function Show-Menu {
         } else {
             $script:IncludeBatang = $requestedBatang
         }
-        $scope = if ($IncludeBatang) { '굴림 + 바탕·궁서' } else { '굴림' }
+        $scope = if ($IncludeBatang) { 'Gulim + Batang/Gungsuh' } else { 'Gulim' }
         $state = Get-PatchState
         Write-Host "  gulim-to-malgun  |  $scope -> $TargetFace"
         Write-Host '  ------------------------------------------------'
         if ($state.RenderOk) {
-            Write-Host "  패치 상태 : 적용됨 - $scope 모두 $TargetFace(으)로 표시됩니다" -ForegroundColor Green
+            Write-Host "  Patch      : Applied - $scope renders as $TargetFace" -ForegroundColor Green
         } elseif ($state.RegistryOk) {
-            Write-Host '  패치 상태 : 적용됨 - 로그아웃 후 다시 로그인하면 반영됩니다' -ForegroundColor Yellow
+            Write-Host '  Patch      : Applied - sign out and back in to take effect' -ForegroundColor Yellow
         } else {
-            Write-Host "  패치 상태 : 적용 안 됨 - 원래 글꼴($scope)로 표시됩니다" -ForegroundColor Red
+            Write-Host "  Patch      : Not applied - $scope renders as the original font" -ForegroundColor Red
         }
         if ($state.Task) {
             $info = $state.Task | Get-ScheduledTaskInfo
-            Write-Host "  자동 유지 : 설치됨 - $scope (마지막 실행 $($info.LastRunTime))" -ForegroundColor Green
+            Write-Host "  Automation : Installed - $scope (last run $($info.LastRunTime))" -ForegroundColor Green
         } else {
-            Write-Host '  자동 유지 : 설치 안 됨 - 업데이트 후 굴림이 다시 나올 수 있습니다' -ForegroundColor Yellow
+            Write-Host '  Automation : Not installed - Gulim may come back after Windows updates' -ForegroundColor Yellow
         }
         Write-Host ''
-        Write-Host '  [1] 설치 - 굴림만             지금 적용 + 업데이트 후에도 자동으로 다시 적용'
-        Write-Host '  [2] 설치 - 굴림 + 바탕·궁서   위와 같고, 바탕·궁서도 함께 바꿈'
-        Write-Host '  [3] 상태   이름별로 실제 표시되는 글꼴 자세히 보기'
-        Write-Host '  [4] 제거   자동 유지 해제 + 원래 상태로 복원'
-        Write-Host '  [0] 종료'
+        Write-Host '  [1] Install - Gulim only             Apply now and re-apply after every update'
+        Write-Host '  [2] Install - Gulim + Batang/Gungsuh Same, and replace Batang/Gungsuh too'
+        Write-Host '  [3] Status                           Show the font each name actually renders as'
+        Write-Host '  [4] Uninstall                        Remove automation and restore the original state'
+        Write-Host '  [0] Exit'
         Write-Host ''
-        $choice = Read-Host '  번호 선택'
+        $choice = Read-Host '  Select'
         if ($choice -eq '0' -or $choice -eq '') { return }
         if ($choice -notin '1', '2', '3', '4') { continue }
 
@@ -447,7 +447,7 @@ function Show-Menu {
                 '2' { $script:IncludeBatang = $true; Invoke-Install }
                 '3' { [void](Show-Status) }
                 '4' {
-                    if ((Read-Host '  자동 유지를 해제하고 원래 상태로 되돌릴까요? (y/N)') -eq 'y') { Invoke-Uninstall }
+                    if ((Read-Host '  Remove automation and restore the original state? (y/N)') -eq 'y') { Invoke-Uninstall }
                 }
             }
         } catch {
@@ -455,7 +455,7 @@ function Show-Menu {
             Write-Host "ERROR: $_" -ForegroundColor Red
         }
         Write-Host ''
-        [void](Read-Host '  Enter를 누르면 메뉴로 돌아갑니다')
+        [void](Read-Host '  Press Enter to return to the menu')
     }
 }
 

@@ -9,16 +9,16 @@ Double-click `gulim-to-malgun.cmd` and approve the administrator prompt. A menu 
 current patch state at the top:
 
 ```
-  gulim-to-malgun  |  굴림 -> Malgun Gothic
+  gulim-to-malgun  |  Gulim -> Malgun Gothic
   ------------------------------------------------
-  패치 상태 : 적용 안 됨 - 원래 글꼴(굴림)로 표시됩니다
-  자동 유지 : 설치 안 됨 - 업데이트 후 굴림이 다시 나올 수 있습니다
+  Patch      : Not applied - Gulim renders as the original font
+  Automation : Not installed - Gulim may come back after Windows updates
 
-  [1] 설치 - 굴림만             지금 적용 + 업데이트 후에도 자동으로 다시 적용
-  [2] 설치 - 굴림 + 바탕·궁서   위와 같고, 바탕·궁서도 함께 바꿈
-  [3] 상태   이름별로 실제 표시되는 글꼴 자세히 보기
-  [4] 제거   자동 유지 해제 + 원래 상태로 복원
-  [0] 종료
+  [1] Install - Gulim only             Apply now and re-apply after every update
+  [2] Install - Gulim + Batang/Gungsuh Same, and replace Batang/Gungsuh too
+  [3] Status                           Show the font each name actually renders as
+  [4] Uninstall                        Remove automation and restore the original state
+  [0] Exit
 ```
 
 Choose `1` (or `2` to also replace Batang and Gungsuh), then sign out and back in. That's it: the fix is applied now and again at every startup
