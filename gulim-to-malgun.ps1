@@ -97,7 +97,7 @@ $SelfText          = [IO.File]::ReadAllText($PSCommandPath)
 
 $RestartHint       = 'Restart Windows to see the change.'
 
-# Optional console font setting (menu item 7). These are the current user's console settings, so the
+# Optional console font setting (menu item 6). These are the current user's console settings, so the
 # originals go in a per-user journal rather than the machine one.
 $ConsoleKeys       = @('Console',
                        'Console\%SystemRoot%_System32_WindowsPowerShell_v1.0_powershell.exe',
@@ -163,7 +163,9 @@ function Get-MachineFontFile([string]$Face, [string[]]$KnownNames) {
     try {
         foreach ($valueName in $key.GetValueNames()) {
             # 'Malgun Gothic (TrueType)', 'Gulim & GulimChe & Dotum & DotumChe (TrueType)'
-            $families = ($valueName -replace '\s*\([^)]*\)\s*$', '') -split '\s*&\s*'
+            # The regular style is often registered with a suffix: 'Cascadia Mono Regular (TrueType)'.
+            $families = ($valueName -replace '\s*\([^)]*\)\s*$', '') -split '\s*&\s*' |
+                ForEach-Object { $_; $_ -replace '\s+(Regular|Normal|Book)$', '' }
             foreach ($family in $families) {
                 if ($names -contains $family) { return Get-LeafName ([string]$key.GetValue($valueName)) }
             }
@@ -332,7 +334,9 @@ function Assert-SafeSource {
     if (-not $unsafe) { return }
     throw ("Other accounts on this PC can change $($unsafe -join ', '). Running it as administrator would run " +
         "whatever they put there. Run gulim-to-malgun.cmd without administrator rights and let it make a " +
-        "protected copy, or put the folder somewhere only you and administrators can change.")
+        "protected copy, or put the folder somewhere only you and administrators can change. If you approve " +
+        "the administrator prompt with a different account, files in your own folders count as another " +
+        "account's: sign in with the administrator account, or run it from a folder that account owns.")
 }
 
 # A copy of this tool in a folder only this user, administrators and SYSTEM can change (inherited
