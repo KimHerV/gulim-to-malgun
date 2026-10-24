@@ -626,8 +626,12 @@ function Select-TargetFace {
 function Show-Menu {
     $requestedBatang = [bool]$IncludeBatang
     $requestedFace = $TargetFace
+    # After an action its output stays on screen and the menu is drawn again below it,
+    # so the next number can be picked right away. Enter alone redraws on a clean screen.
+    $clear = $true
     while ($true) {
-        Clear-Host
+        if ($clear) { Clear-Host } else { Write-Host '  ================================================'; Write-Host '' }
+        $clear = $false
         # Judge the patch by what is installed: Batang counts only if the task replaces it too.
         $installed = Get-InstalledOptions
         if ($installed) {
@@ -660,12 +664,12 @@ function Show-Menu {
         Write-Host '  [2] Install - Gulim + Batang/Gungsuh Same, and replace Batang/Gungsuh too'
         Write-Host '  [3] Status                           Show what each name and fallback actually uses'
         Write-Host '  [4] Uninstall                        Remove automation and restore the original state'
-        Write-Host ('  [5] Font - {0,-26} Choose the font Gulim renders as' -f $TargetFace)
-        Write-Host '  [0] Exit'
+        Write-Host ('  [5] Font - {0,-25} Choose the font Gulim renders as' -f $TargetFace)
+        Write-Host '  [0] Exit                             (Enter alone clears the screen)'
         Write-Host ''
-        $choice = Read-Host '  Select'
-        if ($choice -eq '0' -or $choice -eq '') { return }
-        if ($choice -notin '1', '2', '3', '4', '5') { continue }
+        $choice = "$(Read-Host '  Select')".Trim()
+        if ($choice -eq '0') { return }
+        if ($choice -notin '1', '2', '3', '4', '5') { $clear = $true; continue }
 
         Write-Host ''
         try {
@@ -704,7 +708,6 @@ function Show-Menu {
             Write-Host "ERROR: $_" -ForegroundColor Red
         }
         Write-Host ''
-        [void](Read-Host '  Press Enter to return to the menu')
     }
 }
 
