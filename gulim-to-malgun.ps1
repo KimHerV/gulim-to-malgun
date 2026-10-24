@@ -897,8 +897,11 @@ namespace GulimToMalgun {
 function Show-Menu {
     $requestedBatang = [bool]$IncludeBatang
     $requestedFace = $TargetFace
-    # After an action its output stays on screen and the menu is drawn again below it,
-    # so the next number can be picked right away. Enter alone redraws on a clean screen.
+    # Each action starts on a clean screen, and the menu is drawn again below its output, so the
+    # screen holds only the last action and the next number can be picked right away.
+    # Enter alone redraws the menu on a clean screen.
+    $titles = @{ '1' = 'Install - Gulim only'; '2' = 'Install - Gulim + Batang/Gungsuh'; '3' = 'Status'
+        '4' = 'Uninstall'; '5' = 'Font'; '6' = 'Test' }
     $clear = $true
     while ($true) {
         if ($clear) { Clear-Host } else { Write-Host '  ================================================'; Write-Host '' }
@@ -943,6 +946,8 @@ function Show-Menu {
         if ($choice -eq '0') { return }
         if ($choice -notin '1', '2', '3', '4', '5', '6') { $clear = $true; continue }
 
+        Clear-Host
+        Write-Host "  [$choice] $($titles[$choice])" -ForegroundColor Cyan
         Write-Host ''
         try {
             switch ($choice) {
