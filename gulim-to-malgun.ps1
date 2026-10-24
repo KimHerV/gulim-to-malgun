@@ -6,6 +6,7 @@
     Install    Apply the fix now and re-apply it at every startup and sign-in.
     Uninstall  Remove the automation and put back every value this tool changed.
     Status     Show what Gulim renders as right now, and why. Read-only, no admin needed.
+    Test       Open a window that draws the same line through every way Gulim can appear. No admin needed.
     Apply      Apply once without installing anything. The scheduled task runs this.
 
     Gulim reaches the screen three ways, and Apply closes each one:
@@ -23,6 +24,8 @@
     Status and the menu, to the installed one. Font linking always uses Malgun Gothic.
 .PARAMETER IncludeBatang
     Also replace Batang, BatangChe, Gungsuh and GungsuhChe (바탕, 궁서).
+.PARAMETER OutFile
+    Test only: save the test image to this PNG file instead of opening a window.
 .PARAMETER RemoveCapability
     Also uninstall the Korean Supplemental Fonts feature, which deletes gulim.ttc and batang.ttc.
     Only done in an interactive Install or Apply, never by the scheduled task. Uninstall
@@ -35,11 +38,12 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('Menu', 'Install', 'Uninstall', 'Status', 'Apply')]
+    [ValidateSet('Menu', 'Install', 'Uninstall', 'Status', 'Test', 'Apply')]
     [string]$Action = 'Menu',
     [string]$TargetFace = 'Malgun Gothic',
     [switch]$IncludeBatang,
     [switch]$RemoveCapability,
+    [string]$OutFile,
     [switch]$Quiet,
     [switch]$Elevated
 )
@@ -623,6 +627,207 @@ function Select-TargetFace {
     return $face
 }
 
+# A window that draws the same line through every way Gulim can reach the screen, so the patch can
+# be seen working without hunting for an app that still asks for Gulim. Each row names the font that
+# actually drew it. Reference rows at the bottom show real Gulim/Dotum for comparison.
+function Show-TestWindow {
+    if (-not ('GulimToMalgun.Painter' -as [type])) {
+        Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
+using System;
+using System.Drawing;
+using System.Runtime.InteropServices;
+using System.Text;
+namespace GulimToMalgun {
+  public static class Painter {
+    [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
+    static extern IntPtr CreateFontW(int h, int w, int esc, int orient, int weight, uint italic, uint underline,
+        uint strike, uint charset, uint outPrec, uint clipPrec, uint quality, uint pitchFamily, string face);
+    [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr dc, IntPtr obj);
+    [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr obj);
+    [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] static extern bool TextOutW(IntPtr dc, int x, int y, string s, int n);
+    [DllImport("gdi32.dll")] static extern int SetBkMode(IntPtr dc, int mode);
+    [DllImport("gdi32.dll")] static extern uint SetTextColor(IntPtr dc, uint color);
+    [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] public static extern int AddFontResourceExW(string file, uint flags, IntPtr reserved);
+    [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] public static extern bool RemoveFontResourceExW(string file, uint flags, IntPtr reserved);
+
+    // Draws text with plain GDI (TextOut), which goes through FontSubstitutes and font linking
+    // exactly as older apps do. color is 0x00BBGGRR.
+    public static void Text(Graphics g, int x, int y, string face, int px, int weight, uint charset, uint color, string text) {
+      IntPtr dc = g.GetHdc();
+      try {
+        SetBkMode(dc, 1);
+        SetTextColor(dc, color);
+        IntPtr font = CreateFontW(-px, 0, 0, 0, weight, 0, 0, 0, charset, 0, 0, 5, 0, face);
+        IntPtr old = SelectObject(dc, font);
+        TextOutW(dc, x, y, text, text.Length);
+        SelectObject(dc, old);
+        DeleteObject(font);
+      } finally { g.ReleaseHdc(dc); }
+    }
+  }
+}
+'@
+    }
+    Add-Type -AssemblyName System.Windows.Forms, PresentationCore, PresentationFramework, WindowsBase
+
+    $sample = '가나다 한글 굴림 테스트 漢字 かな ABC 123'
+    $targetNames = @(Get-FamilyNames $TargetFace)
+    $blockedNames = @($FontSets.Values | ForEach-Object { $_.Names })
+    $fontsDir = Join-Path $env:SystemRoot 'Fonts'
+    $green = 0x2E7D32; $red = 0x2828C6; $gray = 0x666666; $black = 0x000000   # 0x00BBGGRR
+    $rows = New-Object System.Collections.Generic.List[object]
+    function Add-Row($Section, $Request, $Result, $Color, $Face, $Charset = 1, $Image = $null) {
+        $rows.Add([pscustomobject]@{ Section = $Section; Request = $Request; Result = $Result; Color = $Color
+            Face = $Face; Charset = $Charset; Image = $Image })
+    }
+    function Get-Verdict([string]$Family) {
+        if ($targetNames -contains $Family) { return @("$Family  OK", $green) }
+        if ($blockedNames -contains $Family) { return @("$Family  << GULIM", $red) }
+        return @($Family, $gray)
+    }
+
+    # 1. By name: what a GDI app gets when it asks for each Gulim/Batang name.
+    foreach ($set in Get-FontSets) {
+        foreach ($name in $set.Names) {
+            $verdict = Get-Verdict (Resolve-GdiFamily $name)
+            Add-Row 'By name (GDI)' $name $verdict[0] $verdict[1] $name
+        }
+    }
+
+    # 2. Font linking: a Latin font asked to draw Korean borrows the missing glyphs through SystemLink.
+    # Which font is lent first is read from the chain; the row shows what it looks like.
+    $linkFile = Get-MachineFontFile $LinkFace
+    $blockedFiles = @(Get-FontSets | ForEach-Object { $_.File })
+    $key = Open-HklmKey $SystemLinkSubKey
+    try {
+        foreach ($face in 'Tahoma', 'Microsoft Sans Serif', 'Segoe UI', 'MS UI Gothic', 'Lucida Sans Unicode') {
+            $chain = @($key.GetValue($face))
+            $first = $chain | ForEach-Object { ($_ -split ',')[0].Trim() } |
+                Where-Object { $_ -ieq $linkFile -or $blockedFiles -contains $_ } | Select-Object -First 1
+            if (-not $first) { Add-Row 'Font link (GDI)' $face 'no Korean font in chain' $gray $face; continue }
+            if ($first -ieq $linkFile) { Add-Row 'Font link (GDI)' $face "borrows $LinkFace  OK" $green $face }
+            else { Add-Row 'Font link (GDI)' $face "borrows $($first.ToUpper())  << GULIM" $red $face }
+        }
+    } finally { $key.Close() }
+
+    # 3. Default face: a name that is not installed falls back to the Korean default face.
+    $verdict = Get-Verdict ([GulimToMalgun.Gdi]::Resolve('NoSuchFont-g2m'))
+    Add-Row 'Default (GDI)' '(missing font)' $verdict[0] $verdict[1] 'NoSuchFont-g2m'
+
+    # 4. DirectWrite side (WPF here; Chrome, Edge and Office behave the same): it ignores
+    # FontSubstitutes, so only an unregistered Gulim keeps it away.
+    foreach ($name in @(Get-FontSets | ForEach-Object { $_.Names[0], $_.Names[4] })) {
+        $typeface = New-Object Windows.Media.Typeface $name
+        $glyphs = $null
+        if ($typeface.TryGetGlyphTypeface([ref]$glyphs)) {
+            $family = @($glyphs.FamilyNames.Values)[0]
+            $result = "found $family  << GULIM"; $color = $red
+        } else {
+            $result = 'not installed, app uses its fallback  OK'; $color = $green
+        }
+        $text = New-Object Windows.Media.FormattedText ($sample, [Globalization.CultureInfo]'ko-KR',
+            'LeftToRight', $typeface, 16, [Windows.Media.Brushes]::Black)
+        $visual = New-Object Windows.Media.DrawingVisual
+        $context = $visual.RenderOpen()
+        $context.DrawRectangle([Windows.Media.Brushes]::White, $null, (New-Object Windows.Rect 0, 0, 520, 24))
+        $context.DrawText($text, (New-Object Windows.Point 0, 2))
+        $context.Close()
+        $bitmap = New-Object Windows.Media.Imaging.RenderTargetBitmap 520, 24, 96, 96, ([Windows.Media.PixelFormats]::Pbgra32)
+        $bitmap.Render($visual)
+        $encoder = New-Object Windows.Media.Imaging.PngBitmapEncoder
+        $encoder.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
+        $stream = New-Object IO.MemoryStream
+        $encoder.Save($stream)
+        Add-Row 'DirectWrite (WPF)' $name $result $color $null 1 ([Drawing.Image]::FromStream($stream))
+    }
+
+    # Draw everything into one image. The reference rows load the real font files privately
+    # (only this process sees them) after every other row is drawn, then unload them.
+    $references = @(
+        @{ Label = "$TargetFace (target)"; Face = $TargetFace; File = $null },
+        @{ Label = 'REAL Gulim (gulim.ttc)'; Face = '굴림'; File = 'gulim.ttc' },
+        @{ Label = 'REAL Dotum (gulim.ttc)'; Face = '돋움'; File = 'gulim.ttc' }
+    )
+    $rowHeight = 28
+    $height = 70 + ($rows.Count + $references.Count) * $rowHeight + 6 * 30
+    $image = New-Object Drawing.Bitmap 1060, $height, ([Drawing.Imaging.PixelFormat]::Format24bppRgb)
+    $graphics = [Drawing.Graphics]::FromImage($image)
+    $graphics.Clear([Drawing.Color]::White)
+    $y = 10
+    [GulimToMalgun.Painter]::Text($graphics, 12, $y, 'Segoe UI', 18, 700, 1, $black,
+        "gulim-to-malgun test  |  target: $TargetFace  |  $(Get-Date -Format 'yyyy-MM-dd HH:mm')")
+    $y += 30
+    [GulimToMalgun.Painter]::Text($graphics, 12, $y, 'Segoe UI', 13, 400, 1, $gray,
+        'Green = the patch is working on that path. Red = Gulim still reaches the screen there. Changes show after a reboot.')
+    $y += 30
+    $section = $null
+    $problems = 0
+    foreach ($row in $rows) {
+        if ($row.Section -ne $section) {
+            $section = $row.Section
+            $graphics.FillRectangle([Drawing.Brushes]::Gainsboro, 0, $y, 1060, 24)
+            [GulimToMalgun.Painter]::Text($graphics, 12, $y + 4, 'Segoe UI', 14, 700, 1, $black, $section)
+            $y += 30
+        }
+        if ($row.Color -eq $red) { $problems++ }
+        [GulimToMalgun.Painter]::Text($graphics, 12, $y + 5, 'Segoe UI', 13, 400, 1, $black, $row.Request)
+        [GulimToMalgun.Painter]::Text($graphics, 190, $y + 5, 'Segoe UI', 13, 700, 1, $row.Color, $row.Result)
+        if ($row.Image) { $graphics.DrawImage($row.Image, 520, $y) }
+        else { [GulimToMalgun.Painter]::Text($graphics, 520, $y + 2, $row.Face, 16, 400, $row.Charset, $black, $sample) }
+        $y += $rowHeight
+    }
+    $graphics.FillRectangle([Drawing.Brushes]::Gainsboro, 0, $y, 1060, 24)
+    [GulimToMalgun.Painter]::Text($graphics, 12, $y + 4, 'Segoe UI', 14, 700, 1, $black, 'Reference (for comparing by eye)')
+    $y += 30
+    foreach ($reference in $references) {
+        $file = if ($reference.File) { Join-Path $fontsDir $reference.File }
+        $loaded = $file -and (Test-Path $file) -and [GulimToMalgun.Painter]::AddFontResourceExW($file, 0x10, [IntPtr]::Zero)
+        [GulimToMalgun.Painter]::Text($graphics, 12, $y + 5, 'Segoe UI', 13, 400, 1, $black, $reference.Label)
+        [GulimToMalgun.Painter]::Text($graphics, 520, $y + 2, $reference.Face, 16, 400, 1, $black, $sample)
+        if ($loaded) { [void][GulimToMalgun.Painter]::RemoveFontResourceExW($file, 0x10, [IntPtr]::Zero) }
+        $y += $rowHeight
+    }
+    $graphics.Dispose()
+
+    $summary = if ($problems) { "$problems path(s) still show Gulim" } else { 'No path shows Gulim' }
+    if ($OutFile) {
+        $image.Save($OutFile, [Drawing.Imaging.ImageFormat]::Png)
+        $image.Dispose()
+        Write-Host "Saved ${OutFile}: $summary."
+        return
+    }
+    $form = New-Object Windows.Forms.Form
+    $form.Text = "gulim-to-malgun test - $summary"
+    $form.Size = New-Object Drawing.Size 1100, ([Math]::Min($height + 110, 900))
+    $form.StartPosition = 'CenterScreen'
+    $panel = New-Object Windows.Forms.Panel
+    $panel.Dock = 'Fill'; $panel.AutoScroll = $true
+    $picture = New-Object Windows.Forms.PictureBox
+    $picture.Image = $image; $picture.SizeMode = 'AutoSize'
+    $panel.Controls.Add($picture)
+    $bar = New-Object Windows.Forms.FlowLayoutPanel
+    $bar.Dock = 'Bottom'; $bar.Height = 40; $bar.FlowDirection = 'RightToLeft'
+    $close = New-Object Windows.Forms.Button
+    $close.Text = 'Close'; $close.Width = 100
+    $close.Add_Click({ $form.Close() })
+    $save = New-Object Windows.Forms.Button
+    $save.Text = 'Save PNG...'; $save.Width = 120
+    $save.Add_Click({
+        $dialog = New-Object Windows.Forms.SaveFileDialog
+        $dialog.Filter = 'PNG image|*.png'
+        $dialog.FileName = "gulim-to-malgun-test-$(Get-Date -Format 'yyyyMMdd-HHmm').png"
+        if ($dialog.ShowDialog($form) -eq 'OK') { $image.Save($dialog.FileName, [Drawing.Imaging.ImageFormat]::Png) }
+    })
+    $bar.Controls.AddRange(@($close, $save))
+    $form.Controls.Add($panel)
+    $form.Controls.Add($bar)
+    $form.CancelButton = $close
+    Write-Host "Test window: $summary."
+    [void]$form.ShowDialog()
+    $form.Dispose()
+    $image.Dispose()
+}
+
 function Show-Menu {
     $requestedBatang = [bool]$IncludeBatang
     $requestedFace = $TargetFace
@@ -665,11 +870,12 @@ function Show-Menu {
         Write-Host '  [3] Status                           Show what each name and fallback actually uses'
         Write-Host '  [4] Uninstall                        Remove automation and restore the original state'
         Write-Host ('  [5] Font - {0,-25} Choose the font Gulim renders as' -f $TargetFace)
+        Write-Host '  [6] Test                             Open a window showing what each path renders as'
         Write-Host '  [0] Exit                             (Enter alone clears the screen)'
         Write-Host ''
         $choice = "$(Read-Host '  Select')".Trim()
         if ($choice -eq '0') { return }
-        if ($choice -notin '1', '2', '3', '4', '5') { $clear = $true; continue }
+        if ($choice -notin '1', '2', '3', '4', '5', '6') { $clear = $true; continue }
 
         Write-Host ''
         try {
@@ -683,6 +889,7 @@ function Show-Menu {
                 }
                 '2' { $script:IncludeBatang = $true; Invoke-Install }
                 '3' { [void](Show-Status) }
+                '6' { Show-TestWindow }
                 '4' {
                     if ((Read-Host '  Remove automation and restore the original state? (y/N)') -eq 'y') { Invoke-Uninstall }
                 }
@@ -713,11 +920,12 @@ function Show-Menu {
 
 #endregion
 
-if ($Action -eq 'Status') {
+if ($Action -in 'Status', 'Test') {
     # Check what is installed, unless the command line asks about something else.
     $installed = Get-InstalledOptions
     if ($installed -and -not $PSBoundParameters.ContainsKey('TargetFace')) { $TargetFace = $installed.TargetFace }
     if ($installed -and -not $PSBoundParameters.ContainsKey('IncludeBatang')) { $IncludeBatang = [switch]$installed.IncludeBatang }
+    if ($Action -eq 'Test') { Show-TestWindow; exit 0 }
     exit (Show-Status)
 }
 
