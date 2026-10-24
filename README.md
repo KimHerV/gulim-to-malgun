@@ -1,30 +1,43 @@
-# gulim-to-malgun
+<h1 align="center">gulim-to-malgun</h1>
 
-**윈도우 11 굴림 글꼴을 맑은 고딕으로 바꾸기** · 굴림체·돋움·바탕·궁서 제거 · 업데이트 후 굴림이 다시
-나올 때 · 한자/일본어가 굴림으로 보일 때 · 프로그램 글꼴이 굴림으로 깨져 보일 때 · 폰트 대체
-(FontSubstitutes)와 글꼴 연결(SystemLink) 자동 적용 · 한 번 설치하면 부팅할 때마다 다시 적용
+<p align="center">
+  Make Gulim (굴림) render as Malgun Gothic (맑은 고딕) on Windows, and keep it that way after updates.
+</p>
 
-Make Gulim (굴림) render as Malgun Gothic (맑은 고딕) on Windows 11, and keep it that way after Windows updates.
-Install once; it re-applies itself automatically.
+<p align="center">
+  <img alt="Windows 11" src="https://img.shields.io/badge/Windows-11-0078D6">
+  <img alt="PowerShell 5.1" src="https://img.shields.io/badge/PowerShell-5.1-5391FE">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/KimHerV/gulim-to-malgun/archive/refs/heads/main.zip"><img alt="Download" src="https://img.shields.io/badge/Download-ZIP-2ea44f?style=for-the-badge"></a>
+</p>
+
+## Features
+
+- **Gets rid of Gulim everywhere,** not just through the usual font substitute: also the cases where
+  Windows ignores it, such as Hanja and kana borrowed from Gulim.
+- **Stays fixed** after Windows updates: a startup task re-applies it.
+- **Fully reversible:** Uninstall puts back exactly what it changed.
+- **Optional:** Batang and Gungsuh too, another replacement font, and one font for cmd and PowerShell.
+- **A test window** shows which font each path really draws with.
 
 ## Install
 
-The script runs as administrator and installs a copy that runs as SYSTEM, so it won't run as
-administrator from a folder that anyone but you, administrators and SYSTEM can change (sandbox and
-service accounts often have write access to drives and user folders). In that case it quietly
-copies itself to `%LOCALAPPDATA%\gulim-to-malgun\source`, a folder only those accounts can change,
-and runs that copy instead, so starting it works the same from anywhere.
+1. [Download the ZIP](https://github.com/KimHerV/gulim-to-malgun/archive/refs/heads/main.zip) and
+   extract it.
+2. Double-click `gulim-to-malgun.cmd` and approve the administrator prompt.
+3. Choose `1`, then **restart Windows**.
 
-Double-click `gulim-to-malgun.cmd` and approve the administrator prompt. A menu opens with the
-current patch state at the top:
+Windows 11 with Korean fonts; nothing else to install. If Windows warns that the file came from the
+internet, right-click the ZIP before extracting, choose Properties, and tick **Unblock**.
+
+## Usage
+
+Run `gulim-to-malgun.cmd` again any time. The menu shows the current state at the top:
 
 ```
-  gulim-to-malgun  |  Gulim -> Malgun Gothic
-  ------------------------------------------------------------
-  Patch      : Not applied - Gulim renders as the original font
-  Automation : Not installed - Windows updates may bring Gulim back
-  Console    : Windows default
-
   [1] Install - Gulim only                Fix it now and keep it fixed at every startup
   [2] Install - Gulim + Batang/Gungsuh    Same, and replace Batang/Gungsuh too
   [3] Replacement font: Malgun Gothic     Choose the font that replaces Gulim
@@ -38,107 +51,65 @@ current patch state at the top:
   [0] Exit                                (Enter alone redraws the menu)
 ```
 
-Choose `1` (or `2` to also replace Batang and Gungsuh), then **restart Windows**. That's it: the fix
-is applied now and again at every startup and sign-in. The installed choice is marked `(installed)`.
-Each action starts on a clean screen and shows its output with the menu below it, so you can pick the
-next number right away; only `0` exits. Choosing `1` while Gulim + Batang is installed asks first,
-then puts Batang/Gungsuh back as they were.
+| Item | Notes |
+|---|---|
+| `3` Replacement font | Any installed font that covers Hangul, installed for all users. |
+| `4` Test, `5` Status | No administrator rights needed. |
+| `6` Console font | Cascadia Mono or Consolas, and UTF-8, for your account. Old programs that print Korean in the legacy encoding may show it garbled; `6` undoes it. |
+| `7` Uninstall | Restart Windows afterwards. |
 
-**Replacement font (`3`).** Lists Malgun Gothic (the default) and every other installed font that
-covers Hangul. Only fonts installed for all users can be picked, because the startup task runs as
-SYSTEM and can't see per-user fonts; those are listed separately with how to fix it. If the fix is
-installed, it asks and then switches right away with the same scope (restart afterwards); otherwise
-the choice is used by the next `1` or `2`. If the chosen font is later uninstalled, the startup task
-falls back to Malgun Gothic.
-
-**Test (`4`).** To see the patch working without hunting for an app that still uses Gulim. It draws
-the same line through every way Gulim can reach the screen (each name, font linking, the default
-face, and DirectWrite), names the font that actually drew each row with an OK or GULIM badge, and
-shows real Gulim, Dotum (and Batang, Gungsuh) underneath for comparison. It follows the Windows
-light/dark app theme; `Esc` closes it. From the command line: `gulim-to-malgun.ps1 Test` (no admin
-needed), or `Test -OutFile result.png` to save the image as a before/after record. **Status (`5`)**
-shows the same as text, for pasting into a bug report.
-
-**Console font (`6`), optional.** Sets cmd and PowerShell windows to one fixed-width font (Cascadia
-Mono or Consolas) and size, for your account only. The console only accepts Korean fonts under the
-Korean code page, and those are exactly the fonts this tool turns into Malgun Gothic, a proportional
-font that spaces Latin letters oddly in the console's fixed cells. So this option also switches the
-console to UTF-8 (code page 65001); Hangul then comes from Malgun Gothic at two cells per character.
-Old programs and `.bat` files that print Korean in the legacy encoding may show it garbled; `6` puts
-the original settings back. Windows Terminal has its own font setting and is not affected, and a
-Start-menu shortcut can carry its own console font, which wins over this setting. "Your account" is
-the account that approves the administrator prompt; if that is a different administrator account,
-the setting lands there.
-
-The same actions work without the menu:
+<details>
+<summary>Command line</summary>
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\gulim-to-malgun.ps1 Install
-powershell -ExecutionPolicy Bypass -File .\gulim-to-malgun.ps1 Status      # no admin needed
+powershell -ExecutionPolicy Bypass -File .\gulim-to-malgun.ps1 Install [-IncludeBatang] [-TargetFace "NanumGothic"]
 powershell -ExecutionPolicy Bypass -File .\gulim-to-malgun.ps1 Uninstall
+powershell -ExecutionPolicy Bypass -File .\gulim-to-malgun.ps1 Status
+powershell -ExecutionPolicy Bypass -File .\gulim-to-malgun.ps1 Test [-OutFile result.png]
 ```
 
-## How Gulim reaches the screen
+`-RemoveCapability` also uninstalls the *Korean Supplemental Fonts* feature, which deletes
+`gulim.ttc` and `batang.ttc` (and GulimChe, Batang, Gungsuh with them). Uninstall reinstalls it.
 
-Mapping Gulim to another font under `HKLM\...\CurrentVersion\FontSubstitutes` is the usual fix,
-and it is not enough on its own. Gulim gets in three ways:
+</details>
 
-1. **By name.** While `gulim.ttc` is registered under `...\CurrentVersion\Fonts`
-   (`Gulim & GulimChe & Dotum & DotumChe (TrueType) = gulim.ttc`), a request for `굴림` gets the real
-   Gulim: GDI lets the installed font win over the substitute for the Korean names, and DirectWrite
-   apps (Chrome, Edge, Office) ignore FontSubstitutes entirely. Only removing the registration
-   stops this.
-2. **By font linking.** `...\FontLink\SystemLink` makes Tahoma, Microsoft Sans Serif, Lucida Sans
-   Unicode and the MS Gothic family borrow missing glyphs from `GULIM.TTC` by file name, so Hanja and
-   kana inside Korean text come out in Gulim even when the text font is something else.
-3. **By default face.** Names that are not installed fall through to the Korean default face, Gulim,
-   and from there through FontSubstitutes. Apps such as AMD Software (Qt) draw Korean this way.
+<details>
+<summary>How it works</summary>
 
-## What it does
+The usual fix, mapping Gulim to another font under `FontSubstitutes`, is not enough. Gulim reaches
+the screen three ways:
 
-- Removes the `gulim.ttc` registration (the font file stays where it is).
-- Points all eight Gulim/Dotum names (English and Korean) at Malgun Gothic (or the font chosen with
-  `3`) in FontSubstitutes.
-- Inserts Malgun Gothic ahead of Gulim in every SystemLink chain that would reach Gulim first, in the
-  same scaled + unscaled pair Windows uses for Segoe UI. Existing entries are kept. This is always
-  Malgun Gothic, whichever font Gulim renders as: it ships with Windows, covers more Hanja (7,476
-  against NanumBarunGothic's 4,621), and switching fonts then leaves SystemLink alone.
-- Copies itself to `C:\Program Files\gulim-to-malgun` and registers the scheduled task
-  `gulim-to-malgun`, which runs that copy as SYSTEM at startup and sign-in and changes only what an
-  update has put back. The copy lives where only administrators can change it because it runs as
-  SYSTEM.
-- Records the original of every value it changes in `original-values.json` before changing it.
-  `Uninstall` puts back exactly those values and nothing else. If a value can't be put back yet (for
-  example a font file is missing), it stays in the journal and the folder is kept, so a later
-  `Uninstall` can finish. Whole-key `.reg` exports from before the first change are kept in
-  `backup\` for manual recovery, and changes and errors are logged in `logs\apply.log`.
+1. **By name.** While `gulim.ttc` is registered, Korean names such as `굴림` get the real Gulim
+   whatever the substitutes say, and Chrome, Edge and Office ignore substitutes altogether.
+2. **By font linking.** `FontLink\SystemLink` makes Tahoma, Microsoft Sans Serif and others borrow
+   Hanja and kana from `GULIM.TTC`.
+3. **By default face.** Unknown font names fall back to Gulim. Apps such as AMD Software draw Korean
+   this way.
 
-Options for `Install` from the command line (menu item `2` is `-IncludeBatang`):
+Install unregisters `gulim.ttc` (the file stays), points every Gulim name at the replacement font,
+and puts Malgun Gothic ahead of Gulim in every font link. It records each original value first, in
+`C:\Program Files\gulim-to-malgun`, and registers a startup task that runs as SYSTEM.
 
-- `-TargetFace "NanumBarunGothic"` - use another font installed for all users instead (menu item `3`).
-- `-IncludeBatang` - also replace Batang, BatangChe, Gungsuh and GungsuhChe (바탕, 궁서). Installing
-  without it over a Gulim + Batang install puts Batang/Gungsuh back first.
-- `-RemoveCapability` - also uninstall the *Korean Supplemental Fonts* Windows feature, which
-  deletes `gulim.ttc` and `batang.ttc`. The most thorough option, but it removes the fixed-width
-  GulimChe/BatangChe and the serif Batang/Gungsuh for good, and updates may reinstall the feature.
-  Done only during an interactive install, never by the scheduled task. `Uninstall` reinstalls it
-  first (needs an internet connection).
+Because that copy runs as SYSTEM, the script won't run as administrator from a folder other accounts
+can change; it quietly runs a protected copy from `%LOCALAPPDATA%\gulim-to-malgun\source` instead.
 
-## Limits
+</details>
 
-- GDI reads fonts, substitutes and font links when the session starts. Restart Windows after
-  installing or uninstalling.
-- After an update re-registers Gulim, the task fixes the registry at the next startup, but the
-  session that started alongside it may still show Gulim. The restart after that is fixed.
-- GulimChe and DotumChe are fixed-width; Malgun Gothic is not, so text aligned in columns with them
-  may shift. In cmd and PowerShell windows this is what menu item `6` fixes.
-- Gulim, Dotum and Batang carry hand-drawn bitmaps for small sizes (about 11-25 pixels), which is
-  what makes them look thin and crisp. Malgun Gothic has none, so at the same size it looks heavier.
-- Web pages that ask for `굴림` fall back to the browser's default font once Gulim is unregistered;
-  set that default to Malgun Gothic in the browser if it is something else. The same goes for a
-  target other than Malgun Gothic: Chrome, Edge, Office and other DirectWrite apps don't read
-  FontSubstitutes, so another target shows up only in GDI apps (older programs and dialogs).
+## Notes
+
+- **Restart after installing or uninstalling.** Windows reads font settings when the session starts.
+- **Small text looks heavier than Gulim.** Gulim has hand-drawn bitmaps for small sizes; Malgun
+  Gothic doesn't.
+- **Fixed-width text may shift,** since GulimChe and DotumChe were fixed-width and Malgun Gothic isn't.
+- **Web pages** that ask for Gulim get the browser's default font instead.
+
+## 한국어
+
+윈도우 굴림 글꼴을 맑은 고딕으로 바꾸는 도구입니다. 굴림체·돋움·돋움체·바탕·궁서 제거, 업데이트 후
+굴림이 다시 나올 때, 한자나 일본어가 굴림으로 보일 때, 프로그램 글꼴이 굴림으로 깨져 보일 때 쓸 수
+있습니다. 폰트 대체(FontSubstitutes)와 글꼴 연결(SystemLink)을 함께 고치고, 한 번 설치하면 부팅할
+때마다 다시 적용합니다. 언제든 원래대로 되돌릴 수 있습니다.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+[MIT](LICENSE) © 2026 KimHerV
