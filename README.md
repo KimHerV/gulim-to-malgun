@@ -24,6 +24,8 @@
 - **Optional extras:** Batang and Gungsuh too, and one font for cmd and PowerShell windows.
 - **Test window:** see which font each kind of app actually gets.
 
+![Test window after installing: every row OK, with the original Gulim, Dotum, Batang and Gungsuh at the bottom for comparison](docs/test.png)
+
 ## Install
 
 1. [Download the ZIP](https://github.com/KimHerV/gulim-to-malgun/archive/refs/heads/main.zip).
