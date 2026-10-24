@@ -335,11 +335,10 @@ function Get-UnsafeSourcePaths([string]$ScriptPath = $PSCommandPath) {
 function Assert-SafeSource {
     $unsafe = @(Get-UnsafeSourcePaths)
     if (-not $unsafe) { return }
-    throw ("Other accounts on this PC can change $($unsafe -join ', '). Running it as administrator would run " +
-        "whatever they put there. Run gulim-to-malgun.cmd without administrator rights and let it make a " +
-        "protected copy, or put the folder somewhere only you and administrators can change. If you approve " +
-        "the administrator prompt with a different account, files in your own folders count as another " +
-        "account's: sign in with the administrator account, or run it from a folder that account owns.")
+    # Reached only in the elevated run; a normal start makes a protected copy before this.
+    throw ("Other accounts on this PC can change this folder ($($unsafe[0])), so it is not safe to run as " +
+        "administrator. Start it by double-clicking gulim-to-malgun.cmd, which makes a safe copy by itself. " +
+        "If you approve the administrator prompt with a different account, sign in as that account instead.")
 }
 
 # A copy of this tool in a folder only this user, administrators and SYSTEM can change (inherited
@@ -394,8 +393,8 @@ function Write-ErrorLog($ErrorRecord) {
 
 function Write-ErrorHelp($ErrorRecord) {
     Write-Host "ERROR: $ErrorRecord" -ForegroundColor Red
-    Write-Host 'Some changes may already have been made. Choose [5] Status to see where things stand, or [7] to'
-    Write-Host "restore everything. Details are in $LogFile."
+    Write-Host 'Some changes may already have been made. Choose [5] Status to see where things stand, or'
+    Write-Host "[7] Uninstall to put everything back. Details are in $LogFile."
 }
 
 function Write-Log([string]$Message) {
@@ -762,9 +761,9 @@ function Show-Status {
     $targetNames = Get-FamilyNames $TargetFace
     $targetFile = Get-MachineFontFile $TargetFace
     if ($targetFile) {
-        Write-Host "Target font : $TargetFace ($($targetNames -join ', ')) = $targetFile"
+        Write-Host "Replacement : $TargetFace ($($targetNames -join ', ')) = $targetFile"
     } else {
-        Write-Host "Target font : $TargetFace  -- NOT INSTALLED FOR ALL USERS" -ForegroundColor Red
+        Write-Host "Replacement : $TargetFace  -- NOT INSTALLED FOR ALL USERS" -ForegroundColor Red
     }
 
     $verdictSets = Get-FontSets
@@ -820,13 +819,13 @@ function Show-Status {
     $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if ($task) {
         $result = ($task | Get-ScheduledTaskInfo).LastTaskResult
-        Write-Host "Automation  : installed, $(Format-LastRun $task), result $result"
+        Write-Host "Startup task: installed, $(Format-LastRun $task), result $result"
     } elseif (Test-Admin) {
-        Write-Host 'Automation  : not installed'
+        Write-Host 'Startup task: not installed'
     } elseif (Test-Path $SettingsFile) {
-        Write-Host 'Automation  : installed (run as administrator for the last run time)'
+        Write-Host 'Startup task: installed (run as administrator for the last run time)'
     } else {
-        Write-Host 'Automation  : unknown (run as administrator to check)'
+        Write-Host 'Startup task: unknown (run as administrator to check)'
     }
 
     Write-Host ''
@@ -834,7 +833,12 @@ function Show-Status {
         Write-Host "OK: Gulim is replaced by $TargetFace everywhere this tool can check." -ForegroundColor Green
         return 0
     }
-    Write-Host "$problems problem(s) found. If you just installed or uninstalled: $RestartHint" -ForegroundColor Red
+    # Installed but not restarted yet: the rendering lines above still show this session's old fonts.
+    if ((Get-PatchState).RegistryOk) {
+        Write-Host 'Installed. Restart Windows to finish; the lines above show this session only.' -ForegroundColor Yellow
+        return 0
+    }
+    Write-Host "$problems problem(s) found. If you just uninstalled: $RestartHint" -ForegroundColor Red
     return 1
 }
 
@@ -977,11 +981,11 @@ namespace GulimToMalgun {
     if ($dark) {
         $palette = @{ Back = (Rgb 32 32 32); Ink = (Rgb 232 232 232); Muted = (Rgb 160 160 160); Line = (Rgb 58 58 58)
             Section = (Rgb 44 44 46); Sample = 0xE8E8E8
-            Ok = @((Rgb 28 64 38), (Rgb 140 222 150)); Bad = @((Rgb 84 30 30), (Rgb 255 150 150)); Other = @((Rgb 58 58 58), (Rgb 160 160 160)) }
+            Ok = @((Rgb 28 64 38), (Rgb 140 222 150)); Bad = @((Rgb 84 30 30), (Rgb 255 150 150)); Warn = @((Rgb 74 60 20), (Rgb 255 214 120)); Other = @((Rgb 58 58 58), (Rgb 160 160 160)) }
     } else {
         $palette = @{ Back = (Rgb 255 255 255); Ink = (Rgb 32 32 32); Muted = (Rgb 110 110 110); Line = (Rgb 232 232 232)
             Section = (Rgb 245 245 247); Sample = 0x202020
-            Ok = @((Rgb 222 241 226), (Rgb 27 94 32)); Bad = @((Rgb 253 226 226), (Rgb 183 28 28)); Other = @((Rgb 236 236 236), (Rgb 110 110 110)) }
+            Ok = @((Rgb 222 241 226), (Rgb 27 94 32)); Bad = @((Rgb 253 226 226), (Rgb 183 28 28)); Warn = @((Rgb 255 244 206), (Rgb 122 89 0)); Other = @((Rgb 236 236 236), (Rgb 110 110 110)) }
     }
     $wpfInk = New-Object Windows.Media.SolidColorBrush ([Windows.Media.Color]::FromRgb($palette.Ink.R, $palette.Ink.G, $palette.Ink.B))
     $wpfBack = New-Object Windows.Media.SolidColorBrush ([Windows.Media.Color]::FromRgb($palette.Back.R, $palette.Back.G, $palette.Back.B))
@@ -1002,7 +1006,7 @@ namespace GulimToMalgun {
     foreach ($set in Get-FontSets) {
         foreach ($name in $set.Names) {
             $verdict = Get-Verdict (Resolve-GdiFamily $name)
-            Add-Row 'By name (GDI)' $name $verdict[0] $verdict[1] $name
+            Add-Row 'By font name (GDI)' $name $verdict[0] $verdict[1] $name
         }
     }
 
@@ -1018,16 +1022,16 @@ namespace GulimToMalgun {
                 $chain = @($key.GetValue($face))
                 $first = $chain | ForEach-Object { Get-LeafName (([string]$_) -split ',')[0] } |
                     Where-Object { $_ -ieq $linkFile -or $blockedFiles -contains $_ } | Select-Object -First 1
-                if (-not $first) { Add-Row 'Font link (GDI, by registry order)' $face 'no Korean font in chain' 'other' $face; continue }
-                if ($first -ieq $linkFile) { Add-Row 'Font link (GDI, by registry order)' $face "borrows $LinkFace" 'ok' $face }
-                else { Add-Row 'Font link (GDI, by registry order)' $face "borrows $($first.ToUpper())" 'bad' $face }
+                if (-not $first) { Add-Row 'Hanja and kana borrowed by other fonts (GDI, by registry order)' $face 'no Korean font in chain' 'other' $face; continue }
+                if ($first -ieq $linkFile) { Add-Row 'Hanja and kana borrowed by other fonts (GDI, by registry order)' $face "borrows $LinkFace" 'ok' $face }
+                else { Add-Row 'Hanja and kana borrowed by other fonts (GDI, by registry order)' $face "borrows $($first.ToUpper())" 'bad' $face }
             }
         } finally { $key.Close() }
     }
 
     # 3. Default face: a name that is not installed falls back to the Korean default face.
     $verdict = Get-Verdict (Resolve-GdiFamily 'NoSuchFont-g2m')
-    Add-Row 'Default (GDI)' '(missing font)' $verdict[0] $verdict[1] 'NoSuchFont-g2m'
+    Add-Row 'Unknown font names (GDI)' '(missing font)' $verdict[0] $verdict[1] 'NoSuchFont-g2m'
 
     # 4. DirectWrite side (WPF here): it ignores FontSubstitutes, so only an unregistered Gulim keeps
     # it away. Browsers and Office use the same font list, with their own fallback when a name is missing.
@@ -1058,24 +1062,28 @@ namespace GulimToMalgun {
         $rowImage = New-Object Drawing.Bitmap $streamImage
         $streamImage.Dispose()
         $stream.Dispose()
-        Add-Row 'DirectWrite (WPF)' $name $result $state $null $rowImage
+        Add-Row 'Modern apps: Chrome, Edge, Office (DirectWrite)' $name $result $state $null $rowImage
     }
 
     # Draw everything into one image. The reference rows load the real font files privately
     # (only this process sees them) after every other row is drawn, then unload them.
     $references = @(
-        @{ Label = "$TargetFace (target)"; Face = $TargetFace; File = $null },
-        @{ Label = 'REAL Gulim (gulim.ttc)'; Face = '굴림'; File = 'gulim.ttc' },
-        @{ Label = 'REAL Dotum (gulim.ttc)'; Face = '돋움'; File = 'gulim.ttc' }
+        @{ Label = "$TargetFace (replacement)"; Face = $TargetFace; File = $null },
+        @{ Label = 'Original Gulim (gulim.ttc)'; Face = '굴림'; File = 'gulim.ttc' },
+        @{ Label = 'Original Dotum (gulim.ttc)'; Face = '돋움'; File = 'gulim.ttc' }
     )
     if ($IncludeBatang) {
-        $references += @{ Label = 'REAL Batang (batang.ttc)'; Face = '바탕'; File = 'batang.ttc' }
-        $references += @{ Label = 'REAL Gungsuh (batang.ttc)'; Face = '궁서'; File = 'batang.ttc' }
+        $references += @{ Label = 'Original Batang (batang.ttc)'; Face = '바탕'; File = 'batang.ttc' }
+        $references += @{ Label = 'Original Gungsuh (batang.ttc)'; Face = '궁서'; File = 'batang.ttc' }
     }
     # Only the sample text goes through GDI, because that is what is being tested. Everything around it
     # is drawn antialiased with GDI+ in Malgun Gothic, which the patch never touches.
     $problems = @($rows | Where-Object State -eq 'bad').Count
-    $summary = if ($problems) { "$problems path(s) still show Gulim" } else { 'No path shows Gulim' }
+    # Installed but not restarted yet: this session still draws the old fonts, which is expected.
+    $pending = $problems -and (Get-PatchState).RegistryOk
+    $summary = if ($pending) { 'Installed - restart Windows, then test again' }
+               elseif ($problems) { "$problems path(s) still show the original font" }
+               else { 'No path shows the original font' }
     function S([double]$Value) { [int][Math]::Round($Value * $scale) }
     $width = 1080
     $rowHeight = 32
@@ -1091,7 +1099,7 @@ namespace GulimToMalgun {
     $line = New-Object Drawing.Pen $palette.Line, 1
     $badges = @{
         ok    = @{ Text = 'OK';    Back = $palette.Ok[0];    Fore = $palette.Ok[1] }
-        bad   = @{ Text = 'GULIM'; Back = $palette.Bad[0];   Fore = $palette.Bad[1] }
+        bad   = @{ Text = 'OLD';   Back = $palette.Bad[0];   Fore = $palette.Bad[1] }
         other = @{ Text = '?';     Back = $palette.Other[0]; Fore = $palette.Other[1] }
     }
     $fontCache = @{}
@@ -1123,13 +1131,16 @@ namespace GulimToMalgun {
 
     $y = 18
     Write-Label 'gulim-to-malgun test' 20 $y 22 'Bold'
-    Write-Label "target: $TargetFace    $(Get-Date -Format 'yyyy-MM-dd HH:mm')" 270 ($y + 7) 13 'Regular' $muted
+    Write-Label "replacement font: $TargetFace    $(Get-Date -Format 'yyyy-MM-dd HH:mm')" 270 ($y + 7) 13 'Regular' $muted
     $y += 40
-    $badgeBack = if ($problems) { $badges.bad } else { $badges.ok }
+    $badgeBack = if ($pending) { @{ Back = $palette.Warn[0]; Fore = $palette.Warn[1] } } elseif ($problems) { $badges.bad } else { $badges.ok }
     $brush = New-Object Drawing.SolidBrush $badgeBack.Back
     $graphics.FillRectangle($brush, (S 20), (S $y), (S ($width - 40)), (S 34))
     $brush.Dispose()
-    Write-Label "$summary.  OK = the patch works on that path, GULIM = Gulim still reaches the screen. Changes show after you restart Windows." 32 ($y + 8) 13 'Regular' $badgeBack.Fore
+    $banner = if ($pending) { 'Installed, but this session still shows the old fonts. Restart Windows, then test again.' }
+              elseif ($problems) { "$summary.  OLD = the original font still reaches the screen there. Install, then restart Windows." }
+              else { "$summary.  OK = the fix works there." }
+    Write-Label $banner 32 ($y + 8) 13 'Regular' $badgeBack.Fore
     $y += 50
     # Column headers once, over the columns the rows actually use.
     Write-Label 'Result' 20 $y 12 'Regular' $muted
@@ -1306,7 +1317,7 @@ function Select-ConsoleFont {
         $size = $parsed
     }
     Write-Host ''
-    Write-Host "  cmd and PowerShell windows will use $face at ${size}px, with UTF-8 text (code page 65001)."
+    Write-Host "  cmd and PowerShell windows will use $face at ${size}px, with UTF-8 text."
     Write-Host '  UTF-8 is needed because the Korean code page only allows Korean fonts. Old programs and'
     Write-Host '  .bat files that print Korean in the legacy encoding may show it garbled; [6] can undo this.'
     if ((Read-Host '  Apply? (y/N)') -ne 'y') {
@@ -1348,21 +1359,21 @@ function Show-Menu {
         Write-Host "  gulim-to-malgun $Version  |  $scope -> $TargetFace"
         Write-Host '  ------------------------------------------------------------'
         if ($state.RenderOk) {
-            Write-Host "  Patch      : Applied - $scope renders as $TargetFace" -ForegroundColor Green
+            Write-Host "  Fix          : Applied - $scope shows as $TargetFace" -ForegroundColor Green
         } elseif ($state.RegistryOk) {
-            Write-Host "  Patch      : Applied - $RestartHint" -ForegroundColor Yellow
+            Write-Host "  Fix          : Applied - $RestartHint" -ForegroundColor Yellow
         } elseif ($state.Removing) {
-            Write-Host "  Patch      : Removed - $RestartHint" -ForegroundColor Yellow
+            Write-Host "  Fix          : Removed - $RestartHint" -ForegroundColor Yellow
         } else {
-            Write-Host "  Patch      : Not applied - $scope renders as the original font" -ForegroundColor Red
+            Write-Host "  Fix          : Not applied - $scope still shows the original font" -ForegroundColor Red
         }
         if ($state.Task) {
-            Write-Host "  Automation : Installed - fixes it again at every startup ($(Format-LastRun $state.Task))" -ForegroundColor Green
+            Write-Host "  Startup task : Installed - fixes it again at every startup ($(Format-LastRun $state.Task))" -ForegroundColor Green
         } else {
-            Write-Host '  Automation : Not installed - Windows updates may bring Gulim back' -ForegroundColor Yellow
+            Write-Host '  Startup task : Not installed - Windows updates may bring Gulim back' -ForegroundColor Yellow
         }
         $consoleText = if ($console) { "$($console.Face) $($console.Size)px" } else { 'Windows default' }
-        Write-Host "  Console    : $consoleText"
+        Write-Host "  Console      : $consoleText"
         Write-Host ''
         # Groups, split by blank lines ($null): install and what it installs; checking; the optional
         # console setting; and removing, last, away from the everyday items.

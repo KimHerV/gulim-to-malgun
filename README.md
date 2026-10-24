@@ -1,7 +1,7 @@
 <h1 align="center">gulim-to-malgun</h1>
 
 <p align="center">
-  Make Gulim (굴림) render as Malgun Gothic (맑은 고딕) on Windows 11, and keep it that way after updates.
+  Make Gulim (굴림) render as Malgun Gothic (맑은 고딕), or another Korean font you choose, on Windows 11, and keep it that way after updates.
 </p>
 
 <p align="center">
@@ -16,23 +16,23 @@
 
 ## Features
 
-- **Gets rid of Gulim everywhere,** not just through the usual font substitute: also the cases where
-  Windows ignores it, such as Hanja and kana borrowed from Gulim.
-- **Stays fixed** after Windows updates: a startup task re-applies it.
+- **Replaces Gulim everywhere:** also where the usual registry fix doesn't work, such as Hanja and
+  Japanese text.
+- **Stays fixed:** a startup task applies the fix again after Windows updates.
 - **Fully reversible:** Uninstall puts back exactly what it changed.
-- **Optional:** Batang and Gungsuh too, another replacement font, and one font for cmd and PowerShell.
-- **A test window** shows which font each path really draws with.
+- **Any Korean font:** Malgun Gothic by default, or another installed font such as NanumGothic.
+- **Optional extras:** Batang and Gungsuh too, and one font for cmd and PowerShell windows.
+- **Test window:** see which font each kind of app actually gets.
 
 ## Install
 
-1. [Download the ZIP](https://github.com/KimHerV/gulim-to-malgun/archive/refs/heads/main.zip) and
-   extract it.
+1. [Download the ZIP](https://github.com/KimHerV/gulim-to-malgun/archive/refs/heads/main.zip).
+   Right-click it, choose Properties, tick **Unblock**, click OK, then extract it.
 2. Double-click `gulim-to-malgun.cmd` and approve the administrator prompt.
 3. Choose `1`, then **restart Windows**.
 
 Requires Windows 11 with Korean fonts; nothing else to install. Other Windows versions haven't been
-tested. If Windows warns that the file came from the
-internet, right-click the ZIP before extracting, choose Properties, and tick **Unblock**.
+tested.
 
 ## Usage
 
@@ -69,7 +69,7 @@ powershell -ExecutionPolicy Bypass -File .\gulim-to-malgun.ps1 Status
 powershell -ExecutionPolicy Bypass -File .\gulim-to-malgun.ps1 Test [-OutFile result.png]
 ```
 
-`-RemoveCapability` also uninstalls the *Korean Supplemental Fonts* feature, which deletes
+`-RemoveCapability` also uninstalls the optional Windows feature *Korean Supplemental Fonts*, which deletes
 `gulim.ttc` and `batang.ttc` (and GulimChe, Batang, Gungsuh with them). Uninstall reinstalls it.
 
 </details>
@@ -106,10 +106,13 @@ can change; it quietly runs a protected copy from `%LOCALAPPDATA%\gulim-to-malgu
 
 ## 한국어
 
-윈도우 11에서 굴림 글꼴을 맑은 고딕으로 바꾸는 도구입니다(다른 윈도우 버전은 테스트하지 않았습니다). 굴림체·돋움·돋움체·바탕·궁서 제거, 업데이트 후
-굴림이 다시 나올 때, 한자나 일본어가 굴림으로 보일 때, 프로그램 글꼴이 굴림으로 깨져 보일 때 쓸 수
-있습니다. 폰트 대체(FontSubstitutes)와 글꼴 연결(SystemLink)을 함께 고치고, 한 번 설치하면 부팅할
-때마다 다시 적용합니다. 언제든 원래대로 되돌릴 수 있습니다.
+윈도우 11에서 굴림(굴림체·돋움·돋움체 포함)을 맑은 고딕으로 바꿔 보이게 하는 도구입니다. 바탕·궁서도
+함께 바꿀 수 있고, 나눔고딕 등 설치된 다른 한글 글꼴을 고를 수도 있습니다. 업데이트 후 굴림이 다시
+나타날 때, 한자·일본어만 굴림으로 보일 때, 프로그램 글꼴(폰트)이 굴림으로 나올 때 쓰세요. 글꼴
+대체(FontSubstitutes)와 글꼴 연결(SystemLink)을 함께 고치고, 부팅할 때마다 다시 적용합니다.
+
+사용법: `gulim-to-malgun.cmd` 더블클릭 → `1` → 재시작. 메뉴 `7`로 언제든 원래대로 되돌릴 수 있습니다.
+(다른 윈도우 버전은 테스트하지 않았습니다.)
 
 ## License
 

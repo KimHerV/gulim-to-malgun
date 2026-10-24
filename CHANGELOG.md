@@ -18,8 +18,7 @@ First release.
 - Optional **Batang/Gungsuh** (바탕, 궁서) replacement, and narrowing back to Gulim only.
 - **Replacement font** choice from every installed font that covers Hangul and is installed for all
   users. Falls back to Malgun Gothic if the chosen font is later uninstalled.
-- **Test window** that draws one line through each Gulim name, the font-linking fonts, the default
-  face and DirectWrite, labels the font that drew it, and shows real Gulim for comparison. Follows
+- **Test window** that draws one line through each Gulim name, the font-linking fonts, unknown font names and DirectWrite, labels the font that drew it, and shows real Gulim for comparison. Follows
   the Windows light/dark theme. `Test -OutFile` saves it as an image.
 - **Status** text report, without administrator rights.
 - Optional **console font** for cmd and PowerShell windows (Cascadia Mono or Consolas, with UTF-8),
