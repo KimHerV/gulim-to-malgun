@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/KimHerV/gulim-to-malgun/archive/refs/heads/main.zip"><img alt="Download" src="https://img.shields.io/badge/Download-ZIP-2ea44f?style=for-the-badge"></a>
+  <a href="https://github.com/KimHerV/gulim-to-malgun/releases/latest/download/gulim-to-malgun.zip"><img alt="Download" src="https://img.shields.io/github/v/release/KimHerV/gulim-to-malgun?style=for-the-badge&label=Download&color=2ea44f"></a>
 </p>
 
 ## Features
@@ -28,7 +28,7 @@
 
 ## Install
 
-1. [Download the ZIP](https://github.com/KimHerV/gulim-to-malgun/archive/refs/heads/main.zip).
+1. [Download the ZIP](https://github.com/KimHerV/gulim-to-malgun/releases/latest/download/gulim-to-malgun.zip).
    Right-click it, choose Properties, tick **Unblock**, click OK, then extract it.
 2. Double-click `gulim-to-malgun.cmd` and approve the administrator prompt.
 3. Choose `1`, then **restart Windows**.
