@@ -1,7 +1,7 @@
 <h1 align="center">gulim-to-malgun</h1>
 
 <p align="center">
-  Make Gulim (굴림) render as Malgun Gothic (맑은 고딕) on Windows, and keep it that way after updates.
+  Make Gulim (굴림) render as Malgun Gothic (맑은 고딕) on Windows 11, and keep it that way after updates.
 </p>
 
 <p align="center">
@@ -30,7 +30,8 @@
 2. Double-click `gulim-to-malgun.cmd` and approve the administrator prompt.
 3. Choose `1`, then **restart Windows**.
 
-Windows 11 with Korean fonts; nothing else to install. If Windows warns that the file came from the
+Requires Windows 11 with Korean fonts; nothing else to install. Other Windows versions haven't been
+tested. If Windows warns that the file came from the
 internet, right-click the ZIP before extracting, choose Properties, and tick **Unblock**.
 
 ## Usage
@@ -105,7 +106,7 @@ can change; it quietly runs a protected copy from `%LOCALAPPDATA%\gulim-to-malgu
 
 ## 한국어
 
-윈도우 굴림 글꼴을 맑은 고딕으로 바꾸는 도구입니다. 굴림체·돋움·돋움체·바탕·궁서 제거, 업데이트 후
+윈도우 11에서 굴림 글꼴을 맑은 고딕으로 바꾸는 도구입니다(다른 윈도우 버전은 테스트하지 않았습니다). 굴림체·돋움·돋움체·바탕·궁서 제거, 업데이트 후
 굴림이 다시 나올 때, 한자나 일본어가 굴림으로 보일 때, 프로그램 글꼴이 굴림으로 깨져 보일 때 쓸 수
 있습니다. 폰트 대체(FontSubstitutes)와 글꼴 연결(SystemLink)을 함께 고치고, 한 번 설치하면 부팅할
 때마다 다시 적용합니다. 언제든 원래대로 되돌릴 수 있습니다.
