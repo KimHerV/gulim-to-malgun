@@ -1,17 +1,17 @@
 <h1 align="center">gulim-to-malgun</h1>
 
 <p align="center">
-  Make Gulim (굴림) render as Malgun Gothic (맑은 고딕), or another Korean font you choose, on Windows 11, and keep it that way after updates.
+  Make Gulim (굴림) render as Malgun Gothic (맑은 고딕) or another Korean font on Windows 11, even after updates.
 </p>
 
 <p align="center">
-  <img alt="Windows 11" src="https://img.shields.io/badge/Windows-11-0078D6">
-  <img alt="PowerShell 5.1" src="https://img.shields.io/badge/PowerShell-5.1-5391FE">
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green"></a>
+  <img alt="Windows 11" src="https://img.shields.io/badge/Windows-11-0078D4">
+  <img alt="Windows PowerShell 5.1" src="https://img.shields.io/badge/PowerShell-5.1-0078D4">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-0078D4"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/KimHerV/gulim-to-malgun/releases/latest/download/gulim-to-malgun.zip"><img alt="Download" src="https://img.shields.io/github/v/release/KimHerV/gulim-to-malgun?style=for-the-badge&label=Download&color=2ea44f"></a>
+  <a href="https://github.com/KimHerV/gulim-to-malgun/releases/latest"><img alt="Download the latest release" src="https://img.shields.io/badge/Download-latest-0078D4?style=for-the-badge"></a>
 </p>
 
 ## Features
@@ -26,15 +26,18 @@
 
 ![Test window after installing: every row OK, with the original Gulim, Dotum, Batang and Gungsuh at the bottom for comparison](docs/test.png)
 
+## Requirements
+
+- Windows 11 with Korean fonts; nothing else to install. Other Windows versions haven't been tested.
+- Administrator rights for Install and Uninstall. Test and Status don't need them.
+
 ## Install
 
-1. [Download the ZIP](https://github.com/KimHerV/gulim-to-malgun/releases/latest/download/gulim-to-malgun.zip).
+1. Download the `.zip` file from the [latest release](https://github.com/KimHerV/gulim-to-malgun/releases/latest).
    Right-click it, choose Properties, tick **Unblock**, click OK, then extract it.
 2. Double-click `gulim-to-malgun.cmd` and approve the administrator prompt.
+   If Windows warns you, see [Security & Trust](#security--trust).
 3. Choose `1`, then **restart Windows**.
-
-Requires Windows 11 with Korean fonts; nothing else to install. Other Windows versions haven't been
-tested.
 
 ## Usage
 
@@ -54,12 +57,12 @@ Run `gulim-to-malgun.cmd` again any time. The menu shows the current state at th
   [0] Exit                                (Enter alone redraws the menu)
 ```
 
-| Item | Notes |
-|---|---|
-| `3` Replacement font | Any installed font that covers Hangul, installed for all users. |
-| `4` Test, `5` Status | No administrator rights needed. |
-| `6` Console font | Cascadia Mono or Consolas, and UTF-8, for your account. Old programs that print Korean in the legacy encoding may show it garbled; `6` undoes it. |
-| `7` Uninstall | Restart Windows afterwards. |
+## Parameters
+
+| Option | Values | Default | What it does |
+|---|---|---|---|
+| `3` Replacement font | any installed font that covers Hangul, installed for all users | Malgun Gothic | Font used in place of Gulim |
+| `6` Console font | Cascadia Mono or Consolas, with UTF-8 | Windows default | Font for cmd and PowerShell windows, for your account. Old programs that print Korean in the legacy encoding may show it garbled; `6` undoes it |
 
 <details>
 <summary>Command line</summary>
@@ -76,11 +79,18 @@ powershell -ExecutionPolicy Bypass -File .\gulim-to-malgun.ps1 Test [-OutFile re
 
 </details>
 
-<details>
-<summary>How it works</summary>
+## What it changes
 
-The usual fix, mapping Gulim to another font under `FontSubstitutes`, is not enough. Gulim reaches
-the screen three ways:
+- Unregisters `gulim.ttc` from the Windows font list. The file stays.
+- Points every Gulim name at the replacement font under `FontSubstitutes`.
+- Puts Malgun Gothic ahead of Gulim in every `FontLink\SystemLink` chain.
+- Records each original value first, in `C:\Program Files\gulim-to-malgun`.
+- Registers a startup task, `gulim-to-malgun`, that runs as SYSTEM at startup and sign-in and re-applies only what an update has put back.
+
+<details>
+<summary>Why the usual fix isn't enough</summary>
+
+Mapping Gulim to another font under `FontSubstitutes` alone doesn't work. Gulim reaches the screen three ways:
 
 1. **By name.** While `gulim.ttc` is registered, Korean names such as `굴림` get the real Gulim
    whatever the substitutes say, and Chrome, Edge and Office ignore substitutes altogether.
@@ -89,14 +99,25 @@ the screen three ways:
 3. **By default face.** Unknown font names fall back to Gulim. Apps such as AMD Software draw Korean
    this way.
 
-Install unregisters `gulim.ttc` (the file stays), points every Gulim name at the replacement font,
-and puts Malgun Gothic ahead of Gulim in every font link. It records each original value first, in
-`C:\Program Files\gulim-to-malgun`, and registers a startup task that runs as SYSTEM.
-
-Because that copy runs as SYSTEM, the script won't run as administrator from a folder other accounts
-can change; it quietly runs a protected copy from `%LOCALAPPDATA%\gulim-to-malgun\source` instead.
-
 </details>
+
+## Uninstall
+
+Run `gulim-to-malgun.cmd`, choose `7`, then restart Windows. It puts back exactly the values it
+recorded and removes the startup task. Any value it can't restore yet is kept for the next run.
+
+## Security & Trust
+
+- **The script is plain text.** Read `gulim-to-malgun.ps1` before running it if you like.
+- **Unblock:** Windows marks downloaded files as coming from the internet. Unblocking the ZIP before
+  extracting removes that mark from the extracted files, so Windows doesn't warn about them.
+- **Execution policy:** `gulim-to-malgun.cmd` starts PowerShell with `-ExecutionPolicy Bypass` for that
+  run only. Your execution policy is not changed.
+- **Runs as administrator and installs a SYSTEM task.** Because of that, the script won't run as
+  administrator from a folder other accounts can change; it quietly runs a protected copy from
+  `%LOCALAPPDATA%\gulim-to-malgun\source` instead.
+- **Check the download:** from v1.0.1, the release notes list the file's SHA-256. Compare it with
+  `Get-FileHash .\gulim-to-malgun-*.zip -Algorithm SHA256`.
 
 ## Notes
 
@@ -113,8 +134,14 @@ can change; it quietly runs a protected copy from `%LOCALAPPDATA%\gulim-to-malgu
 나타날 때, 한자·일본어만 굴림으로 보일 때, 프로그램 글꼴(폰트)이 굴림으로 나올 때 쓰세요. 글꼴
 대체(FontSubstitutes)와 글꼴 연결(SystemLink)을 함께 고치고, 부팅할 때마다 다시 적용합니다.
 
-사용법: `gulim-to-malgun.cmd` 더블클릭 → `1` → 재시작. 메뉴 `7`로 언제든 원래대로 되돌릴 수 있습니다.
-(다른 윈도우 버전은 테스트하지 않았습니다.)
+1. [최신 릴리스](https://github.com/KimHerV/gulim-to-malgun/releases/latest)에서 `.zip` 파일을 받습니다.
+   파일을 오른쪽 클릭 → 속성 → **차단 해제**에 체크한 뒤 압축을 풉니다.
+2. `gulim-to-malgun.cmd`를 더블클릭하고 관리자 권한 요청을 승인합니다.
+3. `1`을 고른 뒤 **윈도우를 다시 시작**합니다.
+4. `4`를 고르면 바뀐 글꼴을 확인할 수 있습니다.
+5. 되돌리려면 `7`을 고른 뒤 다시 시작합니다.
+
+`.cmd`는 이번 실행에만 실행 정책을 우회하고, 설정은 바꾸지 않습니다. 다른 윈도우 버전은 테스트하지 않았습니다.
 
 ## License
 
