@@ -647,6 +647,7 @@ namespace GulimToMalgun {
     [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] static extern bool TextOutW(IntPtr dc, int x, int y, string s, int n);
     [DllImport("gdi32.dll")] static extern int SetBkMode(IntPtr dc, int mode);
     [DllImport("gdi32.dll")] static extern uint SetTextColor(IntPtr dc, uint color);
+    [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
     [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] public static extern int AddFontResourceExW(string file, uint flags, IntPtr reserved);
     [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] public static extern bool RemoveFontResourceExW(string file, uint flags, IntPtr reserved);
 
@@ -674,16 +675,22 @@ namespace GulimToMalgun {
     $targetNames = @(Get-FamilyNames $TargetFace)
     $blockedNames = @($FontSets.Values | ForEach-Object { $_.Names })
     $fontsDir = Join-Path $env:SystemRoot 'Fonts'
-    $green = 0x2E7D32; $red = 0x2828C6; $gray = 0x666666; $black = 0x000000   # 0x00BBGGRR
+    # Draw at the screen's real resolution, so Windows doesn't stretch (and blur) the window.
+    [void][GulimToMalgun.Painter]::SetProcessDPIAware()
+    $screen = [Drawing.Graphics]::FromHwnd([IntPtr]::Zero)
+    $scale = $screen.DpiX / 96
+    $screen.Dispose()
+
+    # State is 'ok' (target font), 'bad' (Gulim/Batang) or 'other'.
     $rows = New-Object System.Collections.Generic.List[object]
-    function Add-Row($Section, $Request, $Result, $Color, $Face, $Charset = 1, $Image = $null) {
-        $rows.Add([pscustomobject]@{ Section = $Section; Request = $Request; Result = $Result; Color = $Color
-            Face = $Face; Charset = $Charset; Image = $Image })
+    function Add-Row($Section, $Request, $Result, $State, $Face, $Image = $null) {
+        $rows.Add([pscustomobject]@{ Section = $Section; Request = $Request; Result = $Result; State = $State
+            Face = $Face; Image = $Image })
     }
     function Get-Verdict([string]$Family) {
-        if ($targetNames -contains $Family) { return @("$Family  OK", $green) }
-        if ($blockedNames -contains $Family) { return @("$Family  << GULIM", $red) }
-        return @($Family, $gray)
+        if ($targetNames -contains $Family) { return @($Family, 'ok') }
+        if ($blockedNames -contains $Family) { return @($Family, 'bad') }
+        return @($Family, 'other')
     }
 
     # 1. By name: what a GDI app gets when it asks for each Gulim/Batang name.
@@ -704,9 +711,9 @@ namespace GulimToMalgun {
             $chain = @($key.GetValue($face))
             $first = $chain | ForEach-Object { ($_ -split ',')[0].Trim() } |
                 Where-Object { $_ -ieq $linkFile -or $blockedFiles -contains $_ } | Select-Object -First 1
-            if (-not $first) { Add-Row 'Font link (GDI)' $face 'no Korean font in chain' $gray $face; continue }
-            if ($first -ieq $linkFile) { Add-Row 'Font link (GDI)' $face "borrows $LinkFace  OK" $green $face }
-            else { Add-Row 'Font link (GDI)' $face "borrows $($first.ToUpper())  << GULIM" $red $face }
+            if (-not $first) { Add-Row 'Font link (GDI)' $face 'no Korean font in chain' 'other' $face; continue }
+            if ($first -ieq $linkFile) { Add-Row 'Font link (GDI)' $face "borrows $LinkFace" 'ok' $face }
+            else { Add-Row 'Font link (GDI)' $face "borrows $($first.ToUpper())" 'bad' $face }
         }
     } finally { $key.Close() }
 
@@ -721,9 +728,9 @@ namespace GulimToMalgun {
         $glyphs = $null
         if ($typeface.TryGetGlyphTypeface([ref]$glyphs)) {
             $family = @($glyphs.FamilyNames.Values)[0]
-            $result = "found $family  << GULIM"; $color = $red
+            $result = "found $family"; $state = 'bad'
         } else {
-            $result = 'not installed, app uses its fallback  OK'; $color = $green
+            $result = 'not installed, app falls back'; $state = 'ok'
         }
         $text = New-Object Windows.Media.FormattedText ($sample, [Globalization.CultureInfo]'ko-KR',
             'LeftToRight', $typeface, 16, [Windows.Media.Brushes]::Black)
@@ -732,13 +739,14 @@ namespace GulimToMalgun {
         $context.DrawRectangle([Windows.Media.Brushes]::White, $null, (New-Object Windows.Rect 0, 0, 520, 24))
         $context.DrawText($text, (New-Object Windows.Point 0, 2))
         $context.Close()
-        $bitmap = New-Object Windows.Media.Imaging.RenderTargetBitmap 520, 24, 96, 96, ([Windows.Media.PixelFormats]::Pbgra32)
+        $bitmap = New-Object Windows.Media.Imaging.RenderTargetBitmap ([int](520 * $scale)), ([int](24 * $scale)),
+            (96 * $scale), (96 * $scale), ([Windows.Media.PixelFormats]::Pbgra32)
         $bitmap.Render($visual)
         $encoder = New-Object Windows.Media.Imaging.PngBitmapEncoder
         $encoder.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
         $stream = New-Object IO.MemoryStream
         $encoder.Save($stream)
-        Add-Row 'DirectWrite (WPF)' $name $result $color $null 1 ([Drawing.Image]::FromStream($stream))
+        Add-Row 'DirectWrite (WPF)' $name $result $state $null ([Drawing.Image]::FromStream($stream))
     }
 
     # Draw everything into one image. The reference rows load the real font files privately
@@ -748,48 +756,98 @@ namespace GulimToMalgun {
         @{ Label = 'REAL Gulim (gulim.ttc)'; Face = '굴림'; File = 'gulim.ttc' },
         @{ Label = 'REAL Dotum (gulim.ttc)'; Face = '돋움'; File = 'gulim.ttc' }
     )
-    $rowHeight = 28
-    $height = 70 + ($rows.Count + $references.Count) * $rowHeight + 6 * 30
-    $image = New-Object Drawing.Bitmap 1060, $height, ([Drawing.Imaging.PixelFormat]::Format24bppRgb)
+    # Only the sample text goes through GDI, because that is what is being tested. Everything around it
+    # is drawn antialiased with GDI+ in Malgun Gothic, which the patch never touches.
+    $problems = @($rows | Where-Object State -eq 'bad').Count
+    $summary = if ($problems) { "$problems path(s) still show Gulim" } else { 'No path shows Gulim' }
+    function S([double]$Value) { [int][Math]::Round($Value * $scale) }
+    $width = 1080
+    $rowHeight = 32
+    $sections = @($rows | ForEach-Object Section | Select-Object -Unique).Count + 1
+    $height = 112 + ($rows.Count + $references.Count) * $rowHeight + $sections * 40 + 12
+    $image = New-Object Drawing.Bitmap (S $width), (S $height), ([Drawing.Imaging.PixelFormat]::Format24bppRgb)
     $graphics = [Drawing.Graphics]::FromImage($image)
     $graphics.Clear([Drawing.Color]::White)
-    $y = 10
-    [GulimToMalgun.Painter]::Text($graphics, 12, $y, 'Segoe UI', 18, 700, 1, $black,
-        "gulim-to-malgun test  |  target: $TargetFace  |  $(Get-Date -Format 'yyyy-MM-dd HH:mm')")
-    $y += 30
-    [GulimToMalgun.Painter]::Text($graphics, 12, $y, 'Segoe UI', 13, 400, 1, $gray,
-        'Green = the patch is working on that path. Red = Gulim still reaches the screen there. Changes show after a reboot.')
-    $y += 30
+    $graphics.SmoothingMode = 'AntiAlias'
+    $graphics.TextRenderingHint = 'AntiAliasGridFit'
+    $ink = [Drawing.Color]::FromArgb(32, 32, 32)
+    $muted = [Drawing.Color]::FromArgb(110, 110, 110)
+    $line = New-Object Drawing.Pen ([Drawing.Color]::FromArgb(232, 232, 232)), 1
+    $badges = @{
+        ok    = @{ Text = 'OK';    Back = [Drawing.Color]::FromArgb(222, 241, 226); Fore = [Drawing.Color]::FromArgb(27, 94, 32) }
+        bad   = @{ Text = 'GULIM'; Back = [Drawing.Color]::FromArgb(253, 226, 226); Fore = [Drawing.Color]::FromArgb(183, 28, 28) }
+        other = @{ Text = '?';     Back = [Drawing.Color]::FromArgb(236, 236, 236); Fore = $muted }
+    }
+    $fontCache = @{}
+    function Write-Label([string]$Text, [double]$X, [double]$Y, [double]$Size = 13, [string]$Style = 'Regular', $Color = $ink) {
+        $id = "$Size|$Style"
+        if (-not $fontCache[$id]) { $fontCache[$id] = New-Object Drawing.Font 'Malgun Gothic', (S $Size), ([Drawing.FontStyle]$Style), ([Drawing.GraphicsUnit]::Pixel) }
+        $brush = New-Object Drawing.SolidBrush $Color
+        $graphics.DrawString($Text, $fontCache[$id], $brush, (S $X), (S $Y))
+        $brush.Dispose()
+    }
+    function Write-Badge([string]$State, [double]$X, [double]$Y) {
+        $badge = $badges[$State]
+        $brush = New-Object Drawing.SolidBrush $badge.Back
+        $graphics.FillRectangle($brush, (S $X), (S $Y), (S 54), (S 20))
+        $brush.Dispose()
+        $format = New-Object Drawing.StringFormat
+        $format.Alignment = 'Center'; $format.LineAlignment = 'Center'
+        if (-not $fontCache.badge) { $fontCache.badge = New-Object Drawing.Font 'Segoe UI', (S 11), ([Drawing.FontStyle]::Bold), ([Drawing.GraphicsUnit]::Pixel) }
+        $brush = New-Object Drawing.SolidBrush $badge.Fore
+        $graphics.DrawString($badge.Text, $fontCache.badge, $brush, (New-Object Drawing.RectangleF (S $X), (S $Y), (S 54), (S 20)), $format)
+        $brush.Dispose()
+    }
+    function Write-Section([string]$Title, [double]$Y) {
+        $brush = New-Object Drawing.SolidBrush ([Drawing.Color]::FromArgb(245, 245, 247))
+        $graphics.FillRectangle($brush, 0, (S $Y), (S $width), (S 30))
+        $brush.Dispose()
+        Write-Label $Title 20 ($Y + 5) 14 'Bold'
+        Write-Label 'Requested' 200 ($Y + 7) 12 'Regular' $muted
+        Write-Label 'Drawn with' 300 ($Y + 7) 12 'Regular' $muted
+        Write-Label 'Sample (as an app sees it)' 560 ($Y + 7) 12 'Regular' $muted
+    }
+
+    $y = 18
+    Write-Label 'gulim-to-malgun test' 20 $y 22 'Bold'
+    Write-Label "target: $TargetFace    $(Get-Date -Format 'yyyy-MM-dd HH:mm')" 270 ($y + 7) 13 'Regular' $muted
+    $y += 40
+    $badgeBack = if ($problems) { $badges.bad } else { $badges.ok }
+    $brush = New-Object Drawing.SolidBrush $badgeBack.Back
+    $graphics.FillRectangle($brush, (S 20), (S $y), (S ($width - 40)), (S 34))
+    $brush.Dispose()
+    Write-Label "$summary.  OK = the patch works on that path, GULIM = Gulim still reaches the screen. Changes show after a reboot." 32 ($y + 8) 13 'Regular' $badgeBack.Fore
+    $y += 54
+
     $section = $null
-    $problems = 0
     foreach ($row in $rows) {
         if ($row.Section -ne $section) {
             $section = $row.Section
-            $graphics.FillRectangle([Drawing.Brushes]::Gainsboro, 0, $y, 1060, 24)
-            [GulimToMalgun.Painter]::Text($graphics, 12, $y + 4, 'Segoe UI', 14, 700, 1, $black, $section)
-            $y += 30
+            Write-Section $section $y
+            $y += 40
         }
-        if ($row.Color -eq $red) { $problems++ }
-        [GulimToMalgun.Painter]::Text($graphics, 12, $y + 5, 'Segoe UI', 13, 400, 1, $black, $row.Request)
-        [GulimToMalgun.Painter]::Text($graphics, 190, $y + 5, 'Segoe UI', 13, 700, 1, $row.Color, $row.Result)
-        if ($row.Image) { $graphics.DrawImage($row.Image, 520, $y) }
-        else { [GulimToMalgun.Painter]::Text($graphics, 520, $y + 2, $row.Face, 16, 400, $row.Charset, $black, $sample) }
+        Write-Badge $row.State 20 ($y + 6)
+        Write-Label $row.Request 90 ($y + 7)
+        Write-Label $row.Result 300 ($y + 7) 13 'Regular' $(if ($row.State -eq 'bad') { $badges.bad.Fore } else { $ink })
+        if ($row.Image) { $graphics.DrawImage($row.Image, (S 560), (S ($y + 3)), $row.Image.Width, $row.Image.Height) }
+        else { [GulimToMalgun.Painter]::Text($graphics, (S 560), (S ($y + 5)), $row.Face, (S 16), 400, 1, 0x202020, $sample) }
+        $graphics.DrawLine($line, (S 20), (S ($y + $rowHeight - 1)), (S ($width - 20)), (S ($y + $rowHeight - 1)))
         $y += $rowHeight
     }
-    $graphics.FillRectangle([Drawing.Brushes]::Gainsboro, 0, $y, 1060, 24)
-    [GulimToMalgun.Painter]::Text($graphics, 12, $y + 4, 'Segoe UI', 14, 700, 1, $black, 'Reference (for comparing by eye)')
-    $y += 30
+    Write-Section 'Reference' $y
+    $y += 40
     foreach ($reference in $references) {
         $file = if ($reference.File) { Join-Path $fontsDir $reference.File }
         $loaded = $file -and (Test-Path $file) -and [GulimToMalgun.Painter]::AddFontResourceExW($file, 0x10, [IntPtr]::Zero)
-        [GulimToMalgun.Painter]::Text($graphics, 12, $y + 5, 'Segoe UI', 13, 400, 1, $black, $reference.Label)
-        [GulimToMalgun.Painter]::Text($graphics, 520, $y + 2, $reference.Face, 16, 400, 1, $black, $sample)
+        Write-Label $reference.Label 90 ($y + 7)
+        [GulimToMalgun.Painter]::Text($graphics, (S 560), (S ($y + 5)), $reference.Face, (S 16), 400, 1, 0x202020, $sample)
         if ($loaded) { [void][GulimToMalgun.Painter]::RemoveFontResourceExW($file, 0x10, [IntPtr]::Zero) }
+        $graphics.DrawLine($line, (S 20), (S ($y + $rowHeight - 1)), (S ($width - 20)), (S ($y + $rowHeight - 1)))
         $y += $rowHeight
     }
+    $fontCache.Values | ForEach-Object { $_.Dispose() }
+    $line.Dispose()
     $graphics.Dispose()
-
-    $summary = if ($problems) { "$problems path(s) still show Gulim" } else { 'No path shows Gulim' }
     if ($OutFile) {
         $image.Save($OutFile, [Drawing.Imaging.ImageFormat]::Png)
         $image.Dispose()
@@ -798,20 +856,26 @@ namespace GulimToMalgun {
     }
     $form = New-Object Windows.Forms.Form
     $form.Text = "gulim-to-malgun test - $summary"
-    $form.Size = New-Object Drawing.Size 1100, ([Math]::Min($height + 110, 900))
+    $workArea = [Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+    $form.ClientSize = New-Object Drawing.Size ([Math]::Min($image.Width + (S 20), $workArea.Width)),
+        ([Math]::Min($image.Height + (S 52), [int]($workArea.Height * 0.9)))
     $form.StartPosition = 'CenterScreen'
+    $form.BackColor = [Drawing.Color]::White
+    $form.Font = New-Object Drawing.Font 'Segoe UI', (S 12), ([Drawing.GraphicsUnit]::Pixel)
     $panel = New-Object Windows.Forms.Panel
     $panel.Dock = 'Fill'; $panel.AutoScroll = $true
     $picture = New-Object Windows.Forms.PictureBox
     $picture.Image = $image; $picture.SizeMode = 'AutoSize'
     $panel.Controls.Add($picture)
     $bar = New-Object Windows.Forms.FlowLayoutPanel
-    $bar.Dock = 'Bottom'; $bar.Height = 40; $bar.FlowDirection = 'RightToLeft'
+    $bar.Dock = 'Bottom'; $bar.Height = (S 48); $bar.FlowDirection = 'RightToLeft'
+    $bar.Padding = New-Object Windows.Forms.Padding (S 8)
+    $bar.BackColor = [Drawing.Color]::FromArgb(245, 245, 247)
     $close = New-Object Windows.Forms.Button
-    $close.Text = 'Close'; $close.Width = 100
+    $close.Text = 'Close'; $close.Size = New-Object Drawing.Size (S 100), (S 30)
     $close.Add_Click({ $form.Close() })
     $save = New-Object Windows.Forms.Button
-    $save.Text = 'Save PNG...'; $save.Width = 120
+    $save.Text = 'Save PNG...'; $save.Size = New-Object Drawing.Size (S 120), (S 30)
     $save.Add_Click({
         $dialog = New-Object Windows.Forms.SaveFileDialog
         $dialog.Filter = 'PNG image|*.png'
@@ -819,8 +883,10 @@ namespace GulimToMalgun {
         if ($dialog.ShowDialog($form) -eq 'OK') { $image.Save($dialog.FileName, [Drawing.Imaging.ImageFormat]::Png) }
     })
     $bar.Controls.AddRange(@($close, $save))
-    $form.Controls.Add($panel)
+    # Bottom bar first, so the scrolling panel fills only what is left above it.
     $form.Controls.Add($bar)
+    $form.Controls.Add($panel)
+    $panel.BringToFront()
     $form.CancelButton = $close
     Write-Host "Test window: $summary."
     [void]$form.ShowDialog()
