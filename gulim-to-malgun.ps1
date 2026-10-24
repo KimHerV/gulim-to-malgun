@@ -652,6 +652,10 @@ namespace GulimToMalgun {
 
     // Dark title bar (DWMWA_USE_IMMERSIVE_DARK_MODE), as Windows apps get in dark mode.
     public static void DarkTitleBar(IntPtr hwnd) { int on = 1; DwmSetWindowAttribute(hwnd, 20, ref on, 4); }
+
+    [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)] static extern int SetWindowTheme(IntPtr hwnd, string app, string idList);
+    // Dark scroll bars, the theme Explorer uses in dark mode.
+    public static void DarkScrollBars(IntPtr hwnd) { SetWindowTheme(hwnd, "DarkMode_Explorer", null); }
     [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] public static extern int AddFontResourceExW(string file, uint flags, IntPtr reserved);
     [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] public static extern bool RemoveFontResourceExW(string file, uint flags, IntPtr reserved);
 
@@ -776,6 +780,10 @@ namespace GulimToMalgun {
         @{ Label = 'REAL Gulim (gulim.ttc)'; Face = '굴림'; File = 'gulim.ttc' },
         @{ Label = 'REAL Dotum (gulim.ttc)'; Face = '돋움'; File = 'gulim.ttc' }
     )
+    if ($IncludeBatang) {
+        $references += @{ Label = 'REAL Batang (batang.ttc)'; Face = '바탕'; File = 'batang.ttc' }
+        $references += @{ Label = 'REAL Gungsuh (batang.ttc)'; Face = '궁서'; File = 'batang.ttc' }
+    }
     # Only the sample text goes through GDI, because that is what is being tested. Everything around it
     # is drawn antialiased with GDI+ in Malgun Gothic, which the patch never touches.
     $problems = @($rows | Where-Object State -eq 'bad').Count
@@ -893,7 +901,10 @@ namespace GulimToMalgun {
     # No buttons: Esc or the title bar closes it, and Test -OutFile saves the image.
     $form.KeyPreview = $true
     $form.Add_KeyDown({ if ($_.KeyCode -eq 'Escape') { $form.Close() } })
-    if ($dark) { $form.Add_HandleCreated({ [GulimToMalgun.Painter]::DarkTitleBar($form.Handle) }) }
+    if ($dark) {
+        $form.Add_HandleCreated({ [GulimToMalgun.Painter]::DarkTitleBar($form.Handle) })
+        $panel.Add_HandleCreated({ [GulimToMalgun.Painter]::DarkScrollBars($panel.Handle) })
+    }
     Write-Host "Test window: $summary."
     [void]$form.ShowDialog()
     $form.Dispose()
