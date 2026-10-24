@@ -344,7 +344,8 @@ function New-ProtectedCopy {
         $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule (
             (New-Object Security.Principal.SecurityIdentifier $sid), 'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow')))
     }
-    Set-Acl -Path $target -AclObject $acl
+    # Not Set-Acl: it can try to write the audit (SACL) part too, which needs a privilege users lack.
+    (Get-Item $target).SetAccessControl($acl)
     $folder = Split-Path $PSCommandPath -Parent
     foreach ($name in 'gulim-to-malgun.ps1', 'gulim-to-malgun.cmd', 'README.md') {
         $source = Join-Path $folder $name
