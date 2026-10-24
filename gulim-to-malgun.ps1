@@ -294,30 +294,33 @@ function Test-Admin {
         [Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-# Accounts that are not this user or an administrator, but could change files they can write to.
-$OtherWriters = @(
-    'S-1-1-0',      # Everyone
-    'S-1-5-11',     # Authenticated Users
-    'S-1-5-32-545', # Users
-    'S-1-5-4'       # Interactive
-)
-
-# Names the script, its folder or the launcher if another account on this PC can change them.
-# Running such a copy as administrator (and installing it to run as SYSTEM) would run whatever
-# that account put there.
-function Get-UnsafeSourcePaths {
+# Names the script, its folder or the launcher if anyone but this user, administrators, SYSTEM or
+# TrustedInstaller can change them. Running such a copy as administrator (and installing it to run
+# as SYSTEM) would run whatever that account put there. An allow-list, because sandbox and service
+# accounts get write access to user folders too, not only the well-known groups.
+function Get-UnsafeSourcePaths([string]$ScriptPath = $PSCommandPath) {
+    $trusted = @(
+        [Security.Principal.WindowsIdentity]::GetCurrent().User.Value,
+        'S-1-5-18',      # SYSTEM
+        'S-1-5-32-544',  # Administrators
+        'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'  # TrustedInstaller
+    )
     $fileRights = [Security.AccessControl.FileSystemRights]'WriteData, AppendData, Delete, ChangePermissions, TakeOwnership'
     $folderRights = [Security.AccessControl.FileSystemRights]'CreateFiles, DeleteSubdirectoriesAndFiles, ChangePermissions, TakeOwnership'
-    $folder = Split-Path $PSCommandPath -Parent
-    $checks = @(@($PSCommandPath, $fileRights), @($folder, $folderRights))
+    $folder = Split-Path $ScriptPath -Parent
+    $checks = @(@($ScriptPath, $fileRights), @($folder, $folderRights))
     $launcher = Join-Path $folder 'gulim-to-malgun.cmd'
     if (Test-Path $launcher) { $checks += , @($launcher, $fileRights) }
     foreach ($check in $checks) {
-        $rules = (Get-Acl $check[0]).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])
-        foreach ($rule in $rules) {
-            if ($rule.AccessControlType -eq 'Allow' -and $OtherWriters -contains $rule.IdentityReference.Value -and
-                ($rule.FileSystemRights -band $check[1])) { $check[0]; break }
-        }
+        $acl = Get-Acl $check[0]
+        $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+        $writers = @(foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
+            # Inherit-only entries apply to children, not to this file or folder.
+            if ($rule.AccessControlType -ne 'Allow' -or $rule.PropagationFlags -band 'InheritOnly') { continue }
+            if ($rule.FileSystemRights -band $check[1]) { $rule.IdentityReference.Value }
+        })
+        # The owner can always change permissions, so it has to be trusted too.
+        if (@($writers + $owner | Where-Object { $trusted -notcontains $_ }).Count) { $check[0] }
     }
 }
 
@@ -325,8 +328,31 @@ function Assert-SafeSource {
     $unsafe = @(Get-UnsafeSourcePaths)
     if (-not $unsafe) { return }
     throw ("Other accounts on this PC can change $($unsafe -join ', '). Running it as administrator would run " +
-        "whatever they put there. Move the gulim-to-malgun folder somewhere only you can change, such as your " +
-        "Downloads or Documents folder, and run it from there.")
+        "whatever they put there. Run gulim-to-malgun.cmd without administrator rights and let it make a " +
+        "protected copy, or put the folder somewhere only you and administrators can change.")
+}
+
+# A copy of this tool in a folder only this user, administrators and SYSTEM can change (inherited
+# permissions removed), for when the folder it was started from is open to other accounts.
+# Returns the copied script's path.
+function New-ProtectedCopy {
+    $target = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'gulim-to-malgun\source'
+    New-Item -ItemType Directory -Path $target -Force | Out-Null
+    $acl = New-Object Security.AccessControl.DirectorySecurity
+    $acl.SetAccessRuleProtection($true, $false)
+    foreach ($sid in [Security.Principal.WindowsIdentity]::GetCurrent().User.Value, 'S-1-5-18', 'S-1-5-32-544') {
+        $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule (
+            (New-Object Security.Principal.SecurityIdentifier $sid), 'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow')))
+    }
+    Set-Acl -Path $target -AclObject $acl
+    $folder = Split-Path $PSCommandPath -Parent
+    foreach ($name in 'gulim-to-malgun.ps1', 'gulim-to-malgun.cmd', 'README.md') {
+        $source = Join-Path $folder $name
+        $destination = Join-Path $target $name
+        if (Test-Path $destination) { Remove-Item $destination -Force }   # a fresh file inherits the new permissions
+        if (Test-Path $source) { Copy-Item $source $destination }
+    }
+    return Join-Path $target 'gulim-to-malgun.ps1'
 }
 
 # Re-runs this script in an elevated window with the same arguments plus -Elevated.
@@ -1397,8 +1423,27 @@ if ($Action -in 'Status', 'Test') {
 
 if (-not (Test-Admin)) {
     if ($Quiet) { Write-Error "$Action -Quiet must run elevated."; exit 1 }
-    # Don't hand administrator rights to a copy that other accounts can change.
-    try { Assert-SafeSource } catch { Write-Host "ERROR: $_" -ForegroundColor Red; exit 1 }
+    # Don't hand administrator rights to a copy that other accounts can change. The check and the
+    # copy run here, before elevation, on the file as it is now.
+    $unsafe = @(Get-UnsafeSourcePaths)
+    if ($unsafe) {
+        Write-Host 'Other accounts on this PC can change this copy of gulim-to-malgun:' -ForegroundColor Yellow
+        $unsafe | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
+        Write-Host 'Running it as administrator would run whatever they put there.'
+        if ((Read-Host 'Make a protected copy that only you and administrators can change, and run that? (Y/n)') -eq 'n') { exit 1 }
+        $copy = New-ProtectedCopy
+        if (@(Get-UnsafeSourcePaths $copy).Count) {
+            Write-Host "ERROR: the copy in $(Split-Path $copy -Parent) is still open to other accounts." -ForegroundColor Red
+            exit 1
+        }
+        Write-Host "Protected copy: $(Split-Path $copy -Parent)"
+        Write-Host 'Next time, run gulim-to-malgun.cmd from there.'
+        $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $copy) + $PSBoundParameters.Keys.ForEach({
+            $value = $PSBoundParameters[$_]
+            if ($_ -eq 'Action') { $value } elseif ($value -is [switch]) { if ($value) { "-$_" } } else { "-$_"; $value } })
+        & $PowerShellExe @arguments
+        exit $LASTEXITCODE
+    }
     exit (Invoke-Elevated)
 }
 
