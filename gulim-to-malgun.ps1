@@ -1426,19 +1426,15 @@ if (-not (Test-Admin)) {
     if ($Quiet) { Write-Error "$Action -Quiet must run elevated."; exit 1 }
     # Don't hand administrator rights to a copy that other accounts can change. The check and the
     # copy run here, before elevation, on the file as it is now.
-    $unsafe = @(Get-UnsafeSourcePaths)
-    if ($unsafe) {
-        Write-Host 'Other accounts on this PC can change this copy of gulim-to-malgun:' -ForegroundColor Yellow
-        $unsafe | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
-        Write-Host 'Running it as administrator would run whatever they put there.'
-        if ((Read-Host 'Make a protected copy that only you and administrators can change, and run that? (Y/n)') -eq 'n') { exit 1 }
+    # If other accounts can change it, run a protected copy instead, without asking: the user just
+    # sees the administrator prompt, as when started from a safe folder.
+    if (@(Get-UnsafeSourcePaths).Count) {
         $copy = New-ProtectedCopy
         if (@(Get-UnsafeSourcePaths $copy).Count) {
-            Write-Host "ERROR: the copy in $(Split-Path $copy -Parent) is still open to other accounts." -ForegroundColor Red
+            Write-Host "ERROR: other accounts on this PC can change this folder, and the protected copy in $(Split-Path $copy -Parent) could not be locked down." -ForegroundColor Red
             exit 1
         }
-        Write-Host "Protected copy: $(Split-Path $copy -Parent)"
-        Write-Host 'Next time, run gulim-to-malgun.cmd from there.'
+        Write-Host "Running a protected copy from $(Split-Path $copy -Parent) (this folder can be changed by other accounts)."
         $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $copy) + $PSBoundParameters.Keys.ForEach({
             $value = $PSBoundParameters[$_]
             if ($_ -eq 'Action') { $value } elseif ($value -is [switch]) { if ($value) { "-$_" } } else { "-$_"; $value } })

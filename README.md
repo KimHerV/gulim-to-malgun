@@ -7,9 +7,9 @@ Install once; it re-applies itself automatically.
 
 The script runs as administrator and installs a copy that runs as SYSTEM, so it won't run as
 administrator from a folder that anyone but you, administrators and SYSTEM can change (sandbox and
-service accounts often have write access to drives and user folders). In that case it offers to
-make a protected copy in `%LOCALAPPDATA%\gulim-to-malgun\source` and continues from there; next
-time, run `gulim-to-malgun.cmd` from that folder.
+service accounts often have write access to drives and user folders). In that case it quietly
+copies itself to `%LOCALAPPDATA%\gulim-to-malgun\source`, a folder only those accounts can change,
+and runs that copy instead, so starting it works the same from anywhere.
 
 Double-click `gulim-to-malgun.cmd` and approve the administrator prompt. A menu opens with the
 current patch state at the top:
