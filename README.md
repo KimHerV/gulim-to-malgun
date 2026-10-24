@@ -19,6 +19,7 @@ current patch state at the top:
   [3] Status                           Show what each name and fallback actually uses
   [4] Uninstall                        Remove automation and restore the original state
   [5] Font - Malgun Gothic             Choose the font Gulim renders as
+  [6] Test                             Open a window showing what each path renders as
   [0] Exit                             (Enter alone clears the screen)
 ```
 
@@ -26,6 +27,12 @@ Choose `1` (or `2` to also replace Batang and Gungsuh), then **reboot**. That's 
 applied now and again at every startup and sign-in. Open the menu again any time to see whether the
 patch is in effect. After each action its output stays on screen with the menu below it, so you can
 pick the next number right away; only `0` exits.
+
+To see the patch working without hunting for an app that still uses Gulim, choose `6`. It draws the
+same line through every way Gulim can reach the screen (each name, font linking, the default face,
+and DirectWrite), names the font that actually drew each row in green or red, and shows real Gulim
+and Dotum underneath for comparison. `Save PNG` keeps a before/after record. From the command line:
+`gulim-to-malgun.ps1 Test` (no admin needed), or `Test -OutFile result.png` to save without a window.
 
 To render Gulim as another font, choose `5`. It lists Malgun Gothic and NanumBarunGothic (나눔바른고딕)
 with whether each is installed for all users; only those can be picked, because the startup task runs
