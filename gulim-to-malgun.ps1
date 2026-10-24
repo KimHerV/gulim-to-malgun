@@ -51,6 +51,9 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
+# Shown in the menu and Status, and recorded in settings.json, so a report says which copy ran.
+$Version = '1.0.0'
+
 # One entry per font file: the file name and every family name it registers (English and Korean).
 # This file is saved as UTF-8 with BOM so Windows PowerShell 5.1 reads the Korean names correctly.
 $FontSets = [ordered]@{
@@ -541,7 +544,7 @@ function Restore-FontSet($Set, [string]$Label) {
 
 function Save-Settings {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
-    $json = ConvertTo-Json @{ TargetFace = $TargetFace; IncludeBatang = [bool]$IncludeBatang }
+    $json = ConvertTo-Json @{ TargetFace = $TargetFace; IncludeBatang = [bool]$IncludeBatang; Version = $Version }
     [IO.File]::WriteAllText($SettingsFile, $json, (New-Object Text.UTF8Encoding $false))
 }
 
@@ -749,6 +752,13 @@ function Format-LastRun($Task) {
 }
 
 function Show-Status {
+    # Which copy is running, and which one the startup task runs (settings.json from 1.0.0 on).
+    $installedVersion = $null
+    if (Test-Path $SettingsFile) {
+        try { $installedVersion = (Get-Content $SettingsFile -Raw -Encoding UTF8 | ConvertFrom-Json).Version } catch { }
+        if (-not $installedVersion) { $installedVersion = 'before 1.0.0' }
+    }
+    Write-Host ("Version     : {0}{1}" -f $Version, $(if ($installedVersion) { "  (installed copy: $installedVersion)" } else { '' }))
     $targetNames = Get-FamilyNames $TargetFace
     $targetFile = Get-MachineFontFile $TargetFace
     if ($targetFile) {
@@ -1335,7 +1345,7 @@ function Show-Menu {
         $scope = if ($IncludeBatang) { 'Gulim + Batang/Gungsuh' } else { 'Gulim' }
         $state = Get-PatchState
         $console = Get-ConsoleFont
-        Write-Host "  gulim-to-malgun  |  $scope -> $TargetFace"
+        Write-Host "  gulim-to-malgun $Version  |  $scope -> $TargetFace"
         Write-Host '  ------------------------------------------------------------'
         if ($state.RenderOk) {
             Write-Host "  Patch      : Applied - $scope renders as $TargetFace" -ForegroundColor Green
