@@ -648,6 +648,10 @@ namespace GulimToMalgun {
     [DllImport("gdi32.dll")] static extern int SetBkMode(IntPtr dc, int mode);
     [DllImport("gdi32.dll")] static extern uint SetTextColor(IntPtr dc, uint color);
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+    [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+
+    // Dark title bar (DWMWA_USE_IMMERSIVE_DARK_MODE), as Windows apps get in dark mode.
+    public static void DarkTitleBar(IntPtr hwnd) { int on = 1; DwmSetWindowAttribute(hwnd, 20, ref on, 4); }
     [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] public static extern int AddFontResourceExW(string file, uint flags, IntPtr reserved);
     [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] public static extern bool RemoveFontResourceExW(string file, uint flags, IntPtr reserved);
 
@@ -680,6 +684,22 @@ namespace GulimToMalgun {
     $screen = [Drawing.Graphics]::FromHwnd([IntPtr]::Zero)
     $scale = $screen.DpiX / 96
     $screen.Dispose()
+
+    # Follow the Windows app theme (Settings > Personalization > Colors).
+    $theme = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -ErrorAction SilentlyContinue
+    $dark = $theme -and $theme.AppsUseLightTheme -eq 0
+    function Rgb([int]$R, [int]$G, [int]$B) { [Drawing.Color]::FromArgb($R, $G, $B) }
+    if ($dark) {
+        $palette = @{ Back = (Rgb 32 32 32); Ink = (Rgb 232 232 232); Muted = (Rgb 160 160 160); Line = (Rgb 58 58 58)
+            Section = (Rgb 44 44 46); Sample = 0xE8E8E8
+            Ok = @((Rgb 28 64 38), (Rgb 140 222 150)); Bad = @((Rgb 84 30 30), (Rgb 255 150 150)); Other = @((Rgb 58 58 58), (Rgb 160 160 160)) }
+    } else {
+        $palette = @{ Back = (Rgb 255 255 255); Ink = (Rgb 32 32 32); Muted = (Rgb 110 110 110); Line = (Rgb 232 232 232)
+            Section = (Rgb 245 245 247); Sample = 0x202020
+            Ok = @((Rgb 222 241 226), (Rgb 27 94 32)); Bad = @((Rgb 253 226 226), (Rgb 183 28 28)); Other = @((Rgb 236 236 236), (Rgb 110 110 110)) }
+    }
+    $wpfInk = New-Object Windows.Media.SolidColorBrush ([Windows.Media.Color]::FromRgb($palette.Ink.R, $palette.Ink.G, $palette.Ink.B))
+    $wpfBack = New-Object Windows.Media.SolidColorBrush ([Windows.Media.Color]::FromRgb($palette.Back.R, $palette.Back.G, $palette.Back.B))
 
     # State is 'ok' (target font), 'bad' (Gulim/Batang) or 'other'.
     $rows = New-Object System.Collections.Generic.List[object]
@@ -733,10 +753,10 @@ namespace GulimToMalgun {
             $result = 'not installed, app falls back'; $state = 'ok'
         }
         $text = New-Object Windows.Media.FormattedText ($sample, [Globalization.CultureInfo]'ko-KR',
-            'LeftToRight', $typeface, 16, [Windows.Media.Brushes]::Black)
+            'LeftToRight', $typeface, 16, $wpfInk)
         $visual = New-Object Windows.Media.DrawingVisual
         $context = $visual.RenderOpen()
-        $context.DrawRectangle([Windows.Media.Brushes]::White, $null, (New-Object Windows.Rect 0, 0, 520, 24))
+        $context.DrawRectangle($wpfBack, $null, (New-Object Windows.Rect 0, 0, 520, 24))
         $context.DrawText($text, (New-Object Windows.Point 0, 2))
         $context.Close()
         $bitmap = New-Object Windows.Media.Imaging.RenderTargetBitmap ([int](520 * $scale)), ([int](24 * $scale)),
@@ -764,19 +784,19 @@ namespace GulimToMalgun {
     $width = 1080
     $rowHeight = 32
     $sections = @($rows | ForEach-Object Section | Select-Object -Unique).Count + 1
-    $height = 112 + ($rows.Count + $references.Count) * $rowHeight + $sections * 40 + 12
+    $height = 134 + ($rows.Count + $references.Count) * $rowHeight + $sections * 40 + 12
     $image = New-Object Drawing.Bitmap (S $width), (S $height), ([Drawing.Imaging.PixelFormat]::Format24bppRgb)
     $graphics = [Drawing.Graphics]::FromImage($image)
-    $graphics.Clear([Drawing.Color]::White)
+    $graphics.Clear($palette.Back)
     $graphics.SmoothingMode = 'AntiAlias'
     $graphics.TextRenderingHint = 'AntiAliasGridFit'
-    $ink = [Drawing.Color]::FromArgb(32, 32, 32)
-    $muted = [Drawing.Color]::FromArgb(110, 110, 110)
-    $line = New-Object Drawing.Pen ([Drawing.Color]::FromArgb(232, 232, 232)), 1
+    $ink = $palette.Ink
+    $muted = $palette.Muted
+    $line = New-Object Drawing.Pen $palette.Line, 1
     $badges = @{
-        ok    = @{ Text = 'OK';    Back = [Drawing.Color]::FromArgb(222, 241, 226); Fore = [Drawing.Color]::FromArgb(27, 94, 32) }
-        bad   = @{ Text = 'GULIM'; Back = [Drawing.Color]::FromArgb(253, 226, 226); Fore = [Drawing.Color]::FromArgb(183, 28, 28) }
-        other = @{ Text = '?';     Back = [Drawing.Color]::FromArgb(236, 236, 236); Fore = $muted }
+        ok    = @{ Text = 'OK';    Back = $palette.Ok[0];    Fore = $palette.Ok[1] }
+        bad   = @{ Text = 'GULIM'; Back = $palette.Bad[0];   Fore = $palette.Bad[1] }
+        other = @{ Text = '?';     Back = $palette.Other[0]; Fore = $palette.Other[1] }
     }
     $fontCache = @{}
     function Write-Label([string]$Text, [double]$X, [double]$Y, [double]$Size = 13, [string]$Style = 'Regular', $Color = $ink) {
@@ -799,13 +819,10 @@ namespace GulimToMalgun {
         $brush.Dispose()
     }
     function Write-Section([string]$Title, [double]$Y) {
-        $brush = New-Object Drawing.SolidBrush ([Drawing.Color]::FromArgb(245, 245, 247))
+        $brush = New-Object Drawing.SolidBrush $palette.Section
         $graphics.FillRectangle($brush, 0, (S $Y), (S $width), (S 30))
         $brush.Dispose()
         Write-Label $Title 20 ($Y + 5) 14 'Bold'
-        Write-Label 'Requested' 200 ($Y + 7) 12 'Regular' $muted
-        Write-Label 'Drawn with' 300 ($Y + 7) 12 'Regular' $muted
-        Write-Label 'Sample (as an app sees it)' 560 ($Y + 7) 12 'Regular' $muted
     }
 
     $y = 18
@@ -817,7 +834,13 @@ namespace GulimToMalgun {
     $graphics.FillRectangle($brush, (S 20), (S $y), (S ($width - 40)), (S 34))
     $brush.Dispose()
     Write-Label "$summary.  OK = the patch works on that path, GULIM = Gulim still reaches the screen. Changes show after a reboot." 32 ($y + 8) 13 'Regular' $badgeBack.Fore
-    $y += 54
+    $y += 50
+    # Column headers once, over the columns the rows actually use.
+    Write-Label 'Result' 20 $y 12 'Regular' $muted
+    Write-Label 'Requested font' 90 $y 12 'Regular' $muted
+    Write-Label 'Actually drawn with' 300 $y 12 'Regular' $muted
+    Write-Label 'Sample (as an app sees it)' 560 $y 12 'Regular' $muted
+    $y += 26
 
     $section = $null
     foreach ($row in $rows) {
@@ -830,7 +853,7 @@ namespace GulimToMalgun {
         Write-Label $row.Request 90 ($y + 7)
         Write-Label $row.Result 300 ($y + 7) 13 'Regular' $(if ($row.State -eq 'bad') { $badges.bad.Fore } else { $ink })
         if ($row.Image) { $graphics.DrawImage($row.Image, (S 560), (S ($y + 3)), $row.Image.Width, $row.Image.Height) }
-        else { [GulimToMalgun.Painter]::Text($graphics, (S 560), (S ($y + 5)), $row.Face, (S 16), 400, 1, 0x202020, $sample) }
+        else { [GulimToMalgun.Painter]::Text($graphics, (S 560), (S ($y + 5)), $row.Face, (S 16), 400, 1, $palette.Sample, $sample) }
         $graphics.DrawLine($line, (S 20), (S ($y + $rowHeight - 1)), (S ($width - 20)), (S ($y + $rowHeight - 1)))
         $y += $rowHeight
     }
@@ -840,7 +863,7 @@ namespace GulimToMalgun {
         $file = if ($reference.File) { Join-Path $fontsDir $reference.File }
         $loaded = $file -and (Test-Path $file) -and [GulimToMalgun.Painter]::AddFontResourceExW($file, 0x10, [IntPtr]::Zero)
         Write-Label $reference.Label 90 ($y + 7)
-        [GulimToMalgun.Painter]::Text($graphics, (S 560), (S ($y + 5)), $reference.Face, (S 16), 400, 1, 0x202020, $sample)
+        [GulimToMalgun.Painter]::Text($graphics, (S 560), (S ($y + 5)), $reference.Face, (S 16), 400, 1, $palette.Sample, $sample)
         if ($loaded) { [void][GulimToMalgun.Painter]::RemoveFontResourceExW($file, 0x10, [IntPtr]::Zero) }
         $graphics.DrawLine($line, (S 20), (S ($y + $rowHeight - 1)), (S ($width - 20)), (S ($y + $rowHeight - 1)))
         $y += $rowHeight
@@ -858,36 +881,19 @@ namespace GulimToMalgun {
     $form.Text = "gulim-to-malgun test - $summary"
     $workArea = [Windows.Forms.Screen]::PrimaryScreen.WorkingArea
     $form.ClientSize = New-Object Drawing.Size ([Math]::Min($image.Width + (S 20), $workArea.Width)),
-        ([Math]::Min($image.Height + (S 64), [int]($workArea.Height * 0.9)))
+        ([Math]::Min($image.Height + (S 12), [int]($workArea.Height * 0.9)))
     $form.StartPosition = 'CenterScreen'
-    $form.BackColor = [Drawing.Color]::White
-    $form.Font = New-Object Drawing.Font 'Segoe UI', (S 12), ([Drawing.GraphicsUnit]::Pixel)
+    $form.BackColor = $palette.Back
     $panel = New-Object Windows.Forms.Panel
     $panel.Dock = 'Fill'; $panel.AutoScroll = $true
     $picture = New-Object Windows.Forms.PictureBox
     $picture.Image = $image; $picture.SizeMode = 'AutoSize'
     $panel.Controls.Add($picture)
-    $bar = New-Object Windows.Forms.FlowLayoutPanel
-    $bar.Dock = 'Bottom'; $bar.AutoSize = $true; $bar.AutoSizeMode = 'GrowAndShrink'; $bar.FlowDirection = 'RightToLeft'
-    $bar.Padding = New-Object Windows.Forms.Padding (S 8)
-    $bar.BackColor = [Drawing.Color]::FromArgb(245, 245, 247)
-    $close = New-Object Windows.Forms.Button
-    $close.Text = 'Close'; $close.Size = New-Object Drawing.Size (S 100), (S 30)
-    $close.Add_Click({ $form.Close() })
-    $save = New-Object Windows.Forms.Button
-    $save.Text = 'Save PNG...'; $save.Size = New-Object Drawing.Size (S 120), (S 30)
-    $save.Add_Click({
-        $dialog = New-Object Windows.Forms.SaveFileDialog
-        $dialog.Filter = 'PNG image|*.png'
-        $dialog.FileName = "gulim-to-malgun-test-$(Get-Date -Format 'yyyyMMdd-HHmm').png"
-        if ($dialog.ShowDialog($form) -eq 'OK') { $image.Save($dialog.FileName, [Drawing.Imaging.ImageFormat]::Png) }
-    })
-    $bar.Controls.AddRange(@($close, $save))
-    # Bottom bar first, so the scrolling panel fills only what is left above it.
-    $form.Controls.Add($bar)
     $form.Controls.Add($panel)
-    $panel.BringToFront()
-    $form.CancelButton = $close
+    # No buttons: Esc or the title bar closes it, and Test -OutFile saves the image.
+    $form.KeyPreview = $true
+    $form.Add_KeyDown({ if ($_.KeyCode -eq 'Escape') { $form.Close() } })
+    if ($dark) { $form.Add_HandleCreated({ [GulimToMalgun.Painter]::DarkTitleBar($form.Handle) }) }
     Write-Host "Test window: $summary."
     [void]$form.ShowDialog()
     $form.Dispose()

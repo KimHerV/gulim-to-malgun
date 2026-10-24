@@ -31,8 +31,9 @@ so you can pick the next number right away; only `0` exits.
 To see the patch working without hunting for an app that still uses Gulim, choose `6`. It draws the
 same line through every way Gulim can reach the screen (each name, font linking, the default face,
 and DirectWrite), names the font that actually drew each row in green or red, and shows real Gulim
-and Dotum underneath for comparison. `Save PNG` keeps a before/after record. From the command line:
-`gulim-to-malgun.ps1 Test` (no admin needed), or `Test -OutFile result.png` to save without a window.
+and Dotum underneath for comparison. It follows the Windows light/dark app theme; `Esc` closes it.
+From the command line: `gulim-to-malgun.ps1 Test` (no admin needed), or `Test -OutFile result.png` to
+save the image as a before/after record instead of opening a window.
 
 To render Gulim as another font, choose `5`. It lists Malgun Gothic and NanumBarunGothic (나눔바른고딕)
 with whether each is installed for all users; only those can be picked, because the startup task runs
