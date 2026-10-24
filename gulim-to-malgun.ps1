@@ -387,7 +387,7 @@ function Write-ErrorLog($ErrorRecord) {
 
 function Write-ErrorHelp($ErrorRecord) {
     Write-Host "ERROR: $ErrorRecord" -ForegroundColor Red
-    Write-Host 'Some changes may already have been made. Choose [3] Status to see where things stand, or [4] to'
+    Write-Host 'Some changes may already have been made. Choose [5] Status to see where things stand, or [7] to'
     Write-Host "restore everything. Details are in $LogFile."
 }
 
@@ -1294,7 +1294,7 @@ function Select-ConsoleFont {
     Write-Host ''
     Write-Host "  cmd and PowerShell windows will use $face at ${size}px, with UTF-8 text (code page 65001)."
     Write-Host '  UTF-8 is needed because the Korean code page only allows Korean fonts. Old programs and'
-    Write-Host '  .bat files that print Korean in the legacy encoding may show it garbled; [7] can undo this.'
+    Write-Host '  .bat files that print Korean in the legacy encoding may show it garbled; [6] can undo this.'
     if ((Read-Host '  Apply? (y/N)') -ne 'y') {
         Write-Host 'Console font unchanged.'
         return
@@ -1313,8 +1313,8 @@ function Show-Menu {
     # Each action starts on a clean screen, and the menu is drawn again below its output, so the
     # screen holds only the last action and the next number can be picked right away.
     # Enter alone redraws the menu on a clean screen.
-    $titles = @{ '1' = 'Install - Gulim only'; '2' = 'Install - Gulim + Batang/Gungsuh'; '3' = 'Status'
-        '4' = 'Uninstall'; '5' = 'Font'; '6' = 'Test'; '7' = 'Console font' }
+    $titles = @{ '1' = 'Install - Gulim only'; '2' = 'Install - Gulim + Batang/Gungsuh'; '3' = 'Replacement font'
+        '4' = 'Test'; '5' = 'Status'; '6' = 'Console font'; '7' = 'Uninstall' }
     $clear = $true
     while ($true) {
         if ($clear) { Clear-Host } else { Write-Host '  ============================================================'; Write-Host '' }
@@ -1350,17 +1350,23 @@ function Show-Menu {
         $consoleText = if ($console) { "$($console.Face) $($console.Size)px" } else { 'Windows default' }
         Write-Host "  Console    : $consoleText"
         Write-Host ''
+        # Groups, split by blank lines ($null): install and what it installs; checking; the optional
+        # console setting; and removing, last, away from the everyday items.
         $items = @(
             @('1', 'Install - Gulim only', 'Fix it now and keep it fixed at every startup'),
             @('2', 'Install - Gulim + Batang/Gungsuh', 'Same, and replace Batang/Gungsuh too'),
-            @('3', 'Status', 'Show which font each Gulim name really uses'),
-            @('4', 'Uninstall', 'Put everything back as it was'),
-            @('5', "Font - $TargetFace", 'Choose the font that replaces Gulim'),
-            @('6', 'Test', 'Open a window that shows the fix working'),
-            @('7', "Console font - $consoleText", 'One font for cmd and PowerShell windows'),
-            @('0', 'Exit', '(Enter alone clears the screen)'))
+            @('3', "Replacement font: $TargetFace", 'Choose the font that replaces Gulim'),
+            $null,
+            @('4', 'Test', 'Open a window that shows the fix working'),
+            @('5', 'Status', 'Text report of which font each Gulim name uses'),
+            $null,
+            @('6', "Console font: $consoleText", 'Optional: font for cmd and PowerShell windows'),
+            $null,
+            @('7', 'Uninstall', 'Put everything back as it was'),
+            @('0', 'Exit', '(Enter alone redraws the menu)'))
         $activeItem = if (-not $installed) { $null } elseif ($installed.IncludeBatang) { '2' } else { '1' }
         foreach ($item in $items) {
+            if (-not $item) { Write-Host ''; continue }
             Write-Host ('  [{0}] {1}{2}' -f $item[0], (Format-Cell $item[1] 36), $item[2]) -NoNewline
             if ($item[0] -eq $activeItem) { Write-Host '  (installed)' -ForegroundColor Green } else { Write-Host '' }
         }
@@ -1384,8 +1390,8 @@ function Show-Menu {
                     }
                 }
                 '2' { $script:IncludeBatang = $true; Invoke-Install }
-                '3' { [void](Show-Status) }
-                '4' {
+                '5' { [void](Show-Status) }
+                '7' {
                     if (-not (Test-Installed)) {
                         Write-Host 'Not installed: nothing to remove.'
                     } elseif ((Read-Host '  Remove the fix and put everything back as it was? (y/N)') -eq 'y') {
@@ -1394,7 +1400,7 @@ function Show-Menu {
                         Write-Host 'Nothing changed.'
                     }
                 }
-                '5' {
+                '3' {
                     $face = Select-TargetFace
                     Write-Host ''
                     if (-not $face -or $face -eq $TargetFace) {
@@ -1410,11 +1416,11 @@ function Show-Menu {
                         Write-Host 'Font unchanged.'
                     }
                 }
-                '6' {
+                '4' {
                     Write-Host 'Test window open. Close it (Esc) to come back here.'
                     Show-TestWindow
                 }
-                '7' { Select-ConsoleFont }
+                '6' { Select-ConsoleFont }
             }
         } catch {
             Write-ErrorLog $_
