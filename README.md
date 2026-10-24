@@ -1,7 +1,7 @@
 <h1 align="center">gulim-to-malgun</h1>
 
 <p align="center">
-  Make Gulim (굴림) render as Malgun Gothic (맑은 고딕) or another Korean font on Windows 11, even after updates.
+  Make Gulim render as Malgun Gothic or another Korean font on Windows 11, even after updates.
 </p>
 
 <p align="center">
