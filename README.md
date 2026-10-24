@@ -55,7 +55,10 @@ Korean code page, and those are exactly the fonts this tool turns into Malgun Go
 font that spaces Latin letters oddly in the console's fixed cells. So this option also switches the
 console to UTF-8 (code page 65001); Hangul then comes from Malgun Gothic at two cells per character.
 Old programs and `.bat` files that print Korean in the legacy encoding may show it garbled; `7` puts
-the original settings back. Windows Terminal has its own font setting and is not affected.
+the original settings back. Windows Terminal has its own font setting and is not affected, and a
+Start-menu shortcut can carry its own console font, which wins over this setting. "Your account" is
+the account that approves the administrator prompt; if that is a different administrator account,
+the setting lands there.
 
 The same actions work without the menu:
 

@@ -1075,7 +1075,7 @@ namespace GulimToMalgun {
     $brush = New-Object Drawing.SolidBrush $badgeBack.Back
     $graphics.FillRectangle($brush, (S 20), (S $y), (S ($width - 40)), (S 34))
     $brush.Dispose()
-    Write-Label "$summary.  OK = the patch works on that path, GULIM = Gulim still reaches the screen. Changes show after a reboot." 32 ($y + 8) 13 'Regular' $badgeBack.Fore
+    Write-Label "$summary.  OK = the patch works on that path, GULIM = Gulim still reaches the screen. Changes show after you restart Windows." 32 ($y + 8) 13 'Regular' $badgeBack.Fore
     $y += 50
     # Column headers once, over the columns the rows actually use.
     Write-Label 'Result' 20 $y 12 'Regular' $muted
