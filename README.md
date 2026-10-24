@@ -1,5 +1,9 @@
 # gulim-to-malgun
 
+**윈도우 11 굴림 글꼴을 맑은 고딕으로 바꾸기** · 굴림체·돋움·바탕·궁서 제거 · 업데이트 후 굴림이 다시
+나올 때 · 한자/일본어가 굴림으로 보일 때 · 프로그램 글꼴이 굴림으로 깨져 보일 때 · 폰트 대체
+(FontSubstitutes)와 글꼴 연결(SystemLink) 자동 적용 · 한 번 설치하면 부팅할 때마다 다시 적용
+
 Make Gulim (굴림) render as Malgun Gothic (맑은 고딕) on Windows 11, and keep it that way after Windows updates.
 Install once; it re-applies itself automatically.
 
