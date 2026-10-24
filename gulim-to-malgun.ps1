@@ -858,7 +858,7 @@ namespace GulimToMalgun {
     $form.Text = "gulim-to-malgun test - $summary"
     $workArea = [Windows.Forms.Screen]::PrimaryScreen.WorkingArea
     $form.ClientSize = New-Object Drawing.Size ([Math]::Min($image.Width + (S 20), $workArea.Width)),
-        ([Math]::Min($image.Height + (S 52), [int]($workArea.Height * 0.9)))
+        ([Math]::Min($image.Height + (S 64), [int]($workArea.Height * 0.9)))
     $form.StartPosition = 'CenterScreen'
     $form.BackColor = [Drawing.Color]::White
     $form.Font = New-Object Drawing.Font 'Segoe UI', (S 12), ([Drawing.GraphicsUnit]::Pixel)
@@ -868,7 +868,7 @@ namespace GulimToMalgun {
     $picture.Image = $image; $picture.SizeMode = 'AutoSize'
     $panel.Controls.Add($picture)
     $bar = New-Object Windows.Forms.FlowLayoutPanel
-    $bar.Dock = 'Bottom'; $bar.Height = (S 48); $bar.FlowDirection = 'RightToLeft'
+    $bar.Dock = 'Bottom'; $bar.AutoSize = $true; $bar.AutoSizeMode = 'GrowAndShrink'; $bar.FlowDirection = 'RightToLeft'
     $bar.Padding = New-Object Windows.Forms.Padding (S 8)
     $bar.BackColor = [Drawing.Color]::FromArgb(245, 245, 247)
     $close = New-Object Windows.Forms.Button
