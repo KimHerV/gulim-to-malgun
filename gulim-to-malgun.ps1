@@ -868,7 +868,9 @@ function Select-TargetFace {
         $notes = @()
         if ($choice.Face -eq $DefaultFace) { $notes += 'default' }
         if ($choice.Face -eq $TargetFace) { $notes += 'current' }
-        Write-Host ('  [{0}] {1}' -f ($i + 1), (Format-Cell $choice.Face 22)) -NoNewline
+        # '[1] ' and '[10]' take the same width once there are ten or more.
+        $number = "[$($i + 1)]".PadRight("[$($usable.Count)]".Length)
+        Write-Host ('  {0} {1}' -f $number, (Format-Cell $choice.Face 22)) -NoNewline
         # Default and current in green, so the font in use stands out.
         Write-Host (Format-Cell ($notes -join ', ') 18) -NoNewline -ForegroundColor Green
         Write-Host $choice.LocalName
