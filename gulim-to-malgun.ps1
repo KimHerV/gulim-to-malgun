@@ -61,6 +61,8 @@ $FontSets = [ordered]@{
 # The default target, always listed first in the menu. The menu also lists every other font that is
 # installed for all users and covers Hangul; -TargetFace accepts any such font.
 $DefaultFace = 'Malgun Gothic'
+# Everyday Hangul a replacement font must have (see Get-FaceChoices).
+$HangulSample = '가나다라마바사아자차카타파하한글굴림맑은고딕바탕궁서돋움체설정확인취소닫기열기저장'
 
 # Font linking always borrows from Malgun Gothic, whatever the target: it ships with Windows, covers
 # more Hanja than most targets, and switching targets then never rewrites SystemLink again.
@@ -153,8 +155,9 @@ function Get-FamilyNames([string]$Face) {
 
 # File name of a font installed for all users (HKLM), e.g. 'Malgun Gothic' -> malgun.ttf.
 # Per-user fonts don't count: SYSTEM and other accounts can't see them.
-function Get-MachineFontFile([string]$Face) {
-    $names = @(Get-FamilyNames $Face) + $Face
+function Get-MachineFontFile([string]$Face, [string[]]$KnownNames) {
+    # Callers that already have the family names pass them, which skips another walk over every font.
+    $names = @($(if ($KnownNames) { $KnownNames } else { Get-FamilyNames $Face })) + $Face
     $key = Open-HklmKey $FontsSubKey
     if (-not $key) { return $null }
     try {
@@ -833,14 +836,19 @@ function Get-FaceChoices {
         if ($face -eq $DefaultFace -or $face.StartsWith('@')) { continue }
         $names = @($family.FamilyNames.Values)
         if (@($names | Where-Object { $blockedNames -contains $_ }).Count) { continue }
+        # Judge the regular face (the first one listed can be Light or Bold, with fewer glyphs).
+        $typefaces = @($family.GetTypefaces())
+        $typeface = @($typefaces | Where-Object { $_.Weight -eq [Windows.FontWeights]::Normal -and
+            $_.Style -eq [Windows.FontStyles]::Normal }) + $typefaces | Select-Object -First 1
         $glyphs = $null
-        $typeface = @($family.GetTypefaces()) | Select-Object -First 1
         if (-not $typeface -or -not $typeface.TryGetGlyphTypeface([ref]$glyphs)) { continue }
+        # Covers Hangul: has every syllable of a sample of everyday text. All of them are in the 2,350
+        # syllables of KS X 1001, where many fonts stop, so 힣-style rare syllables are not required.
         $map = $glyphs.CharacterToGlyphMap
-        if (-not ($map.ContainsKey(0xAC00) -and $map.ContainsKey(0xD7A3))) { continue }   # 가 .. 힣
+        if (@($HangulSample.ToCharArray() | Where-Object { -not $map.ContainsKey([int]$_) }).Count) { continue }
         # Problem is why it can't be used: only this user can see it (the task runs as SYSTEM), or
         # GDI knows the font by another name, so a substitute naming it would fall back elsewhere.
-        $problem = if (-not (Get-MachineFontFile $face)) { 'UserOnly' }
+        $problem = if (-not (Get-MachineFontFile $face $names)) { 'UserOnly' }
                    elseif ($names -notcontains (Resolve-GdiFamily $face)) { 'GdiName' }
                    else { $null }
         [pscustomobject]@{ Face = $face; LocalName = ($names | Where-Object { $_ -ne $face } | Select-Object -First 1)
@@ -860,7 +868,10 @@ function Select-TargetFace {
         $notes = @()
         if ($choice.Face -eq $DefaultFace) { $notes += 'default' }
         if ($choice.Face -eq $TargetFace) { $notes += 'current' }
-        Write-Host ('  [{0}] {1}{2}{3}' -f ($i + 1), (Format-Cell $choice.Face 22), (Format-Cell ($notes -join ', ') 18), $choice.LocalName)
+        Write-Host ('  [{0}] {1}' -f ($i + 1), (Format-Cell $choice.Face 22)) -NoNewline
+        # Default and current in green, so the font in use stands out.
+        Write-Host (Format-Cell ($notes -join ', ') 18) -NoNewline -ForegroundColor Green
+        Write-Host $choice.LocalName
     }
     $userOnly = @($choices | Where-Object Problem -eq 'UserOnly' | ForEach-Object Face)
     if ($userOnly) {
