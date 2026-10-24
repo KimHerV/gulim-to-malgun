@@ -134,3 +134,7 @@ Options for `Install` from the command line (menu item `2` is `-IncludeBatang`):
   set that default to Malgun Gothic in the browser if it is something else. The same goes for a
   target other than Malgun Gothic: Chrome, Edge, Office and other DirectWrite apps don't read
   FontSubstitutes, so another target shows up only in GDI apps (older programs and dialogs).
+
+## License
+
+MIT. See [LICENSE](LICENSE).
